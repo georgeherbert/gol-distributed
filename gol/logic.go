@@ -104,8 +104,6 @@ func gol(world [][]byte, turns int, turnsChan chan<- int, aliveCellsChan chan<- 
 	return world, completedTurns
 }
 
-//TODO remove all references to ioChannels, events channels, etc.
-
 
 
 
