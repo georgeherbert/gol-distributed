@@ -61,6 +61,23 @@ func getAliveCells(world [][]byte) []util.Cell {
 	return aliveCells
 }
 
+// Writes to a file and sends the correct event
+func writeFile(world [][]byte, fileName string, turns int, ioCommand chan<- ioCommand, ioFileName chan<- string,
+	ioOutputChannel chan<- uint8, events chan<- Event) {
+	outputFileName := fileName + "x" + strconv.Itoa(turns)
+	ioCommand <- ioOutput
+	ioFileName <- outputFileName
+	for _, row := range world {
+		for _, element := range row {
+			ioOutputChannel <- element
+		}
+	}
+	events <- ImageOutputComplete{ // implements Event
+		CompletedTurns: turns,
+		Filename:       outputFileName,
+	}
+}
+
 // Distributor divides the work between workers and interacts with other goroutines.
 func controller(p Params, c distributorChannels) {
 	fileName := strconv.Itoa(p.ImageWidth) + "x" + strconv.Itoa(p.ImageHeight)
@@ -74,10 +91,9 @@ func controller(p Params, c distributorChannels) {
 		CompletedTurns: completedTurns,
 		Alive:          aliveCells,
 	}
-	// Make sure that the Io has finished any output before exiting.
-	c.ioCommand <- ioCheckIdle
+	writeFile(completedWorld, fileName, completedTurns, c.ioCommand, c.ioFileName, c.ioOutput, c.events)
+	c.ioCommand <- ioCheckIdle // Make sure that the Io has finished any output before exiting.
 	<-c.ioIdle
 	c.events <- StateChange{completedTurns, Quitting}
-	// Close the channel to stop the SDL goroutine gracefully. Removing may cause deadlock.
-	close(c.events)
+	close(c.events) // Close the channel to stop the SDL goroutine gracefully. Removing may cause deadlock.
 }
