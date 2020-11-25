@@ -21,6 +21,18 @@ func sendFileName(fileName string, ioCommand chan<- ioCommand, ioFileName chan<-
 	ioFileName <- fileName
 }
 
+// Reports the number of alive cells every time it receives data
+func reportAliveCells(events chan<- Event, turnsChan <-chan int, aliveCellsChan <-chan int) {
+	for {
+		turns := <-turnsChan
+		aliveCells := <-aliveCellsChan
+		events <- AliveCellsCount{
+			CompletedTurns: turns,
+			CellsCount:     aliveCells,
+		}
+	}
+}
+
 // Returns a slice of alive cells
 func getAliveCells(world [][]byte) []util.Cell {
 	var aliveCells []util.Cell
@@ -38,7 +50,9 @@ func getAliveCells(world [][]byte) []util.Cell {
 func controller(p Params, c distributorChannels) {
 	fileName := strconv.Itoa(p.ImageWidth) + "x" + strconv.Itoa(p.ImageHeight)
 	sendFileName(fileName, c.ioCommand, c.ioFileName)
-	world, completedTurns := gol(p.ImageHeight, p.ImageWidth, p.Turns, c.ioInput, c.events)
+	turnsChan, aliveCellsChan := make(chan int), make(chan int)
+	go reportAliveCells(c.events, turnsChan, aliveCellsChan)
+	world, completedTurns := gol(p.ImageHeight, p.ImageWidth, p.Turns, c.ioInput, turnsChan, aliveCellsChan)
 	aliveCells := getAliveCells(world)
 	c.events <- FinalTurnComplete{
 		CompletedTurns: completedTurns,

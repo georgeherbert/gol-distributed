@@ -3,11 +3,10 @@ package gol
 import (
 	"sync"
 	"time"
-	"uk.ac.bris.cs/gameoflife/util"
 )
 
 // Returns the world with its initial values filled
-func initialiseWorld(height int, width int, ioInput <-chan uint8, events chan<- Event) [][]byte {
+func initialiseWorld(height int, width int, ioInput <-chan uint8) [][]byte {
 	world := make([][]byte, height)
 	for y := range world {
 		world[y] = make([]byte, width)
@@ -16,19 +15,7 @@ func initialiseWorld(height int, width int, ioInput <-chan uint8, events chan<- 
 		for x := range row {
 			cell := <-ioInput
 			world[y][x] = cell
-			if cell == 255 {
-				events <- CellFlipped{
-					CompletedTurns: 0,
-					Cell: util.Cell{
-						X: x,
-						Y: y,
-					},
-				}
-			}
 		}
-	}
-	events <- TurnComplete{
-		CompletedTurns: 0,
 	}
 	return world
 }
@@ -80,7 +67,7 @@ func calcValue(item byte, liveNeighbours int) byte {
 }
 
 // Returns the next state of a world given the current state
-func calcNextState(world [][]byte, events chan<- Event, turn int) [][]byte {
+func calcNextState(world [][]byte) [][]byte {
 	var nextWorld [][]byte
 	for y, row := range world {
 		nextWorld = append(nextWorld, []byte{})
@@ -89,15 +76,6 @@ func calcNextState(world [][]byte, events chan<- Event, turn int) [][]byte {
 			liveNeighbours := calcLiveNeighbours(neighbours)
 			value := calcValue(element, liveNeighbours)
 			nextWorld[y] = append(nextWorld[y], value)
-			if value != world[y][x] {
-				events <- CellFlipped{
-					CompletedTurns: turn,
-					Cell: util.Cell{
-						X: x,
-						Y: y,
-					},
-				}
-			}
 		}
 	}
 	return nextWorld
@@ -117,8 +95,8 @@ func calcNumAliveCells(world [][]byte) int {
 }
 
 // Distributor divides the work between workers and interacts with other goroutines.
-func gol(imageHeight int, imageWidth int, turns int, ioInput <-chan uint8, events chan<- Event) ([][]byte, int) {
-	world := initialiseWorld(imageHeight, imageWidth, ioInput, events)
+func gol(imageHeight int, imageWidth int, turns int, ioInput <-chan uint8, turnsChan chan<- int, aliveCellsChan chan<- int) ([][]byte, int) {
+	world := initialiseWorld(imageHeight, imageWidth, ioInput)
 	var turn int
 	var completedTurns int
 	mutexTurnsWorld := &sync.Mutex{}
@@ -128,21 +106,26 @@ func gol(imageHeight int, imageWidth int, turns int, ioInput <-chan uint8, event
 		for {
 			<-ticker.C
 			mutexTurnsWorld.Lock()
-			events <- AliveCellsCount{
-				CompletedTurns: completedTurns,
-				CellsCount:     calcNumAliveCells(world),
-			}
+			turnsChan <- completedTurns
+			aliveCellsChan <- calcNumAliveCells(world)
 			mutexTurnsWorld.Unlock()
 		}
 	}()
 	for turn = 0; turn < turns; turn++ {
 		mutexTurnsWorld.Lock()
-		world = calcNextState(world, events, turn)
+		world = calcNextState(world)
 		completedTurns = turn + 1
 		mutexTurnsWorld.Unlock()
-		events <- TurnComplete{
-			CompletedTurns: completedTurns,
-		}
 	}
 	return world, completedTurns
 }
+
+//TODO remove all references to ioChannels, events channels, etc.
+
+
+
+
+
+
+
+
