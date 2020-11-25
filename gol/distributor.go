@@ -16,9 +16,8 @@ type distributorChannels struct {
 }
 
 // Sends the file name to io.go so the world can be initialised
-func sendFileName(imageWidth int, imageHeight int, ioCommand chan<- ioCommand, ioFileName chan<- string) {
+func sendFileName(fileName string, ioCommand chan<- ioCommand, ioFileName chan<- string) {
 	ioCommand <- ioInput
-	fileName := strconv.Itoa(imageWidth) + "x" + strconv.Itoa(imageHeight)
 	ioFileName <- fileName
 }
 
@@ -36,12 +35,15 @@ func initialiseWorld(height int, width int, ioInput <-chan uint8, events chan<- 
 				events <- CellFlipped{
 					CompletedTurns: 0,
 					Cell: util.Cell{
-						X: y,
-						Y: x,
+						X: x,
+						Y: y,
 					},
 				}
 			}
 		}
+	}
+	events <- TurnComplete{
+		CompletedTurns: 0,
 	}
 	return world
 }
@@ -106,8 +108,8 @@ func calculateNextState(world [][]byte, events chan<- Event) [][]byte {
 				events <- CellFlipped{
 					CompletedTurns: 0,
 					Cell: util.Cell{
-						X: y,
-						Y: x,
+						X: x,
+						Y: y,
 					},
 				}
 			}
@@ -116,22 +118,8 @@ func calculateNextState(world [][]byte, events chan<- Event) [][]byte {
 	return nextWorld
 }
 
-// Distributor divides the work between workers and interacts with other goroutines.
-func distributor(p Params, c distributorChannels) {
-	// TODO: Create a 2D slice to store the world.
-	// TODO: For all initially alive cells send a CellFlipped Event.
-	// TODO: Execute all turns of the Game of Life.
-	// TODO: Send correct Events when required, e.g. CellFlipped, TurnComplete and FinalTurnComplete.
-	//		 See event.go for a list of all events.
-	sendFileName(p.ImageWidth, p.ImageWidth, c.ioCommand, c.ioFileName)
-	world := initialiseWorld(p.ImageHeight, p.ImageWidth, c.ioInput, c.events)
-	var turn int
-	for turn = 0; turn < p.Turns; turn++ {
-		world = calculateNextState(world, c.events)
-		c.events <- TurnComplete{
-			CompletedTurns: turn,
-		}
-	}
+// Returns a slice of alive cells
+func getAliveCells(world [][]byte) []util.Cell {
 	var aliveCells []util.Cell
 	for y, row := range world {
 		for x, element := range row {
@@ -140,14 +128,31 @@ func distributor(p Params, c distributorChannels) {
 			}
 		}
 	}
+	return aliveCells
+}
+
+// Distributor divides the work between workers and interacts with other goroutines.
+func distributor(p Params, c distributorChannels) {
+	fileName := strconv.Itoa(p.ImageWidth) + "x" + strconv.Itoa(p.ImageHeight)
+	sendFileName(fileName, c.ioCommand, c.ioFileName)
+	world := initialiseWorld(p.ImageHeight, p.ImageWidth, c.ioInput, c.events)
+	var turn int
+	var completedTurns int
+	for turn = 0; turn < p.Turns; turn++ {
+		world = calculateNextState(world, c.events)
+		completedTurns = turn + 1
+		c.events <- TurnComplete{
+			CompletedTurns: completedTurns,
+		}
+	}
+	aliveCells := getAliveCells(world)
 	c.events <- FinalTurnComplete{
-		CompletedTurns: turn,
+		CompletedTurns: completedTurns,
 		Alive:          aliveCells,
 	}
 	// Make sure that the Io has finished any output before exiting.
 	c.ioCommand <- ioCheckIdle
 	<-c.ioIdle
-
 	c.events <- StateChange{turn, Quitting}
 	// Close the channel to stop the SDL goroutine gracefully. Removing may cause deadlock.
 	close(c.events)
