@@ -21,6 +21,21 @@ func sendFileName(fileName string, ioCommand chan<- ioCommand, ioFileName chan<-
 	ioFileName <- fileName
 }
 
+// Returns the world with its initial values filled
+func initialiseWorld(height int, width int, ioInput <-chan uint8) [][]byte {
+	world := make([][]byte, height)
+	for y := range world {
+		world[y] = make([]byte, width)
+	}
+	for y, row := range world {
+		for x := range row {
+			cell := <-ioInput
+			world[y][x] = cell
+		}
+	}
+	return world
+}
+
 // Reports the number of alive cells every time it receives data
 func reportAliveCells(events chan<- Event, turnsChan <-chan int, aliveCellsChan <-chan int) {
 	for {
@@ -50,10 +65,11 @@ func getAliveCells(world [][]byte) []util.Cell {
 func controller(p Params, c distributorChannels) {
 	fileName := strconv.Itoa(p.ImageWidth) + "x" + strconv.Itoa(p.ImageHeight)
 	sendFileName(fileName, c.ioCommand, c.ioFileName)
+	world := initialiseWorld(p.ImageHeight, p.ImageWidth, c.ioInput)
 	turnsChan, aliveCellsChan := make(chan int), make(chan int)
 	go reportAliveCells(c.events, turnsChan, aliveCellsChan)
-	world, completedTurns := gol(p.ImageHeight, p.ImageWidth, p.Turns, c.ioInput, turnsChan, aliveCellsChan)
-	aliveCells := getAliveCells(world)
+	completedWorld, completedTurns := gol(world, p.Turns, turnsChan, aliveCellsChan)
+	aliveCells := getAliveCells(completedWorld)
 	c.events <- FinalTurnComplete{
 		CompletedTurns: completedTurns,
 		Alive:          aliveCells,

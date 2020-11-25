@@ -5,21 +5,6 @@ import (
 	"time"
 )
 
-// Returns the world with its initial values filled
-func initialiseWorld(height int, width int, ioInput <-chan uint8) [][]byte {
-	world := make([][]byte, height)
-	for y := range world {
-		world[y] = make([]byte, width)
-	}
-	for y, row := range world {
-		for x := range row {
-			cell := <-ioInput
-			world[y][x] = cell
-		}
-	}
-	return world
-}
-
 // Returns the neighbours of a cell at given coordinates
 func getNeighbours(world [][]byte, row int, column int) []byte {
 	rowAbove, rowBelow := row - 1, row + 1
@@ -95,8 +80,7 @@ func calcNumAliveCells(world [][]byte) int {
 }
 
 // Distributor divides the work between workers and interacts with other goroutines.
-func gol(imageHeight int, imageWidth int, turns int, ioInput <-chan uint8, turnsChan chan<- int, aliveCellsChan chan<- int) ([][]byte, int) {
-	world := initialiseWorld(imageHeight, imageWidth, ioInput)
+func gol(world [][]byte, turns int, turnsChan chan<- int, aliveCellsChan chan<- int) ([][]byte, int) {
 	var turn int
 	var completedTurns int
 	mutexTurnsWorld := &sync.Mutex{}
