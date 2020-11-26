@@ -107,7 +107,8 @@ func calcNumAliveCells(world [][]byte) int {
 }
 
 // Returns the world with its final values filled
-func sendWorld(world [][]byte, conn net.Conn) {
+func sendWorld(world [][]byte, conn net.Conn, completedTurns int) {
+	fmt.Fprintf(conn, "%d\n", completedTurns)
 	for _, row := range world {
 		for _, element := range row {
 			fmt.Fprintf(conn, "%d\n", element)
@@ -136,6 +137,7 @@ func main() {
 		done := false
 		mutexDone := &sync.Mutex{}
 		mutexTurnsWorld := &sync.Mutex{}
+		mutexSending := &sync.Mutex{} // Used whenever sending data to client to stop multiple things being sent at once
 		ticker := time.NewTicker(2 * time.Second)
 		go func() {
 			for {
@@ -143,8 +145,11 @@ func main() {
 				mutexDone.Lock()
 				if !done {
 					mutexTurnsWorld.Lock()
+					mutexSending.Lock()
+					fmt.Fprintf(conn, "REPORT_ALIVE\n")
 					fmt.Fprintf(conn, "%d\n", completedTurns)
 					fmt.Fprintf(conn, "%d\n", calcNumAliveCells(world))
+					mutexSending.Unlock()
 					mutexTurnsWorld.Unlock()
 				}
 				mutexDone.Unlock()
@@ -154,7 +159,13 @@ func main() {
 			for {
 				action, _ := reader.ReadString('\n')
 				if action == "SAVE\n" {
-					fmt.Println("SAVE")
+					mutexTurnsWorld.Lock()
+					mutexSending.Lock()
+					fmt.Fprintf(conn, "SENDING_WORLD\n")
+					sendWorld(world, conn, completedTurns)
+					mutexSending.Unlock()
+					mutexTurnsWorld.Unlock()
+					fmt.Println("Sent World")
 				} else if action == "STOP\n" {
 					fmt.Println("STOP")
 				} else if action == "PAUSE\n"  {
@@ -178,7 +189,9 @@ func main() {
 		mutexDone.Unlock()
 
 		// Send the world back to the controller
-		sendWorld(world, conn)
+		mutexSending.Lock()
+		sendWorld(world, conn, completedTurns)
+		mutexSending.Unlock()
 		fmt.Printf("Computed %d turns of %dx%d\n", completedTurns, height, width)
 	}
 }

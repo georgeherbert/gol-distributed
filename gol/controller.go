@@ -53,21 +53,30 @@ func manageKeyPresses(keyPresses <-chan rune, conn net.Conn) {
 	}
 }
 
-// Reports the number of alive cells every time it receives data
-func reportAliveCells(events chan<- Event, done chan<- bool, reader *bufio.Reader) {
+func handleEngine(events chan<- Event, reader *bufio.Reader, done chan<- bool, imageHeight int, imageWidth int,
+	fileName string, ioCommand chan<- ioCommand, ioFileName chan<- string, ioOutput chan<- uint8) {
 	for {
-		turnsString, _ := reader.ReadString('\n')
-		if turnsString == "DONE\n" {
+		operation, _ := reader.ReadString('\n')
+		if operation == "REPORT_ALIVE\n" {
+			reportAliveCells(events, reader)
+		} else if operation == "DONE\n" {
 			done <- true
-			break
+			break // Stops loop trying to receive inputs as would otherwise receive the cell values as inputs
+		} else if operation == "SENDING_WORLD\n" {
+			world, completedTurns := receiveWorld(imageHeight, imageWidth, reader)
+			writeFile(world, fileName, completedTurns, ioCommand, ioFileName, ioOutput, events)
 		}
-		aliveCellsString, _ := reader.ReadString('\n')
-		turns := netStringToInt(turnsString)
-		aliveCells := netStringToInt(aliveCellsString)
-		events <- AliveCellsCount{
-			CompletedTurns: turns,
-			CellsCount:     aliveCells,
-		}
+	}
+}
+
+func reportAliveCells(events chan<- Event, reader *bufio.Reader) {
+	turnsString, _ := reader.ReadString('\n')
+	aliveCellsString, _ := reader.ReadString('\n')
+	turns := netStringToInt(turnsString)
+	aliveCells := netStringToInt(aliveCellsString)
+	events <- AliveCellsCount{
+		CompletedTurns: turns,
+		CellsCount:     aliveCells,
 	}
 }
 
@@ -77,7 +86,9 @@ func netStringToInt(netString string) int {
 	return integer
 }
 
-func receiveWorld(height int, width int, reader *bufio.Reader) [][]byte {
+func receiveWorld(height int, width int, reader *bufio.Reader) ([][]byte, int) {
+	completedTurnsString, _ := reader.ReadString('\n')
+	completedTurns := netStringToInt(completedTurnsString)
 	world := make([][]byte, height)
 	for y := range world {
 		world[y] = make([]byte, width)
@@ -89,7 +100,7 @@ func receiveWorld(height int, width int, reader *bufio.Reader) [][]byte {
 			world[y][x] = byte(cell)
 		}
 	}
-	return world
+	return world, completedTurns
 }
 
 // Returns a slice of alive cells
@@ -136,40 +147,24 @@ func controller(p Params, c distributorChannels) {
 	fmt.Fprintf(conn, "%d\n", p.Turns) // Send number of turns to server
 
 	sendWorld(p.ImageHeight, p.ImageWidth, c.ioInput, conn) // Send the world to the server
-	done := make(chan bool) // Used to stop execution until the turns are done executing
 
 	go manageKeyPresses(c.keyPresses, conn)
-	go reportAliveCells(c.events, done, reader) // Report the alive cells until the engine is done
+	done := make(chan bool) // Used to stop execution until the turns are done executing otherwise receiveWorld will start trying to receive
+	go handleEngine(c.events, reader, done, p.ImageHeight, p.ImageWidth, fileName, c.ioCommand, c.ioFileName, c.ioOutput) // Report the alive cells until the engine is done
 	<-done
 
 	// Receives the world back from the server once all rounds are complete
-	world := receiveWorld(p.ImageHeight, p.ImageWidth, reader)
+	world, completedTurns := receiveWorld(p.ImageHeight, p.ImageWidth, reader)
 
 	// Once the final turn is complete
 	aliveCells := getAliveCells(world)
 	c.events <- FinalTurnComplete{
-		CompletedTurns: p.Turns,
+		CompletedTurns: completedTurns,
 		Alive:          aliveCells,
 	}
-	writeFile(world, fileName, p.Turns, c.ioCommand, c.ioFileName, c.ioOutput, c.events)
+	writeFile(world, fileName, completedTurns, c.ioCommand, c.ioFileName, c.ioOutput, c.events)
 	c.ioCommand <- ioCheckIdle // Make sure that the Io has finished any output before exiting.
 	<-c.ioIdle
-	c.events <- StateChange{p.Turns, Quitting}
+	c.events <- StateChange{completedTurns, Quitting}
 	close(c.events) // Close the channel to stop the SDL goroutine gracefully. Removing may cause deadlock.
-
-	//world := initialiseWorld(p.ImageHeight, p.ImageWidth, c.ioInput)
-	//
-	//turnsChan, aliveCellsChan := make(chan int), make(chan int)
-	//go reportAliveCells(c.events, turnsChan, aliveCellsChan)
-	//completedWorld, completedTurns := engine(world, p.Turns, turnsChan, aliveCellsChan)
-	//aliveCells := getAliveCells(completedWorld)
-	//c.events <- FinalTurnComplete{
-	//	CompletedTurns: completedTurns,
-	//	Alive:          aliveCells,
-	//}
-	////writeFile(completedWorld, fileName, completedTurns, c.ioCommand, c.ioFileName, c.ioOutput, c.events)
-	//c.ioCommand <- ioCheckIdle // Make sure that the Io has finished any output before exiting.
-	//<-c.ioIdle
-	//c.events <- StateChange{completedTurns, Quitting}
-	//close(c.events) // Close the channel to stop the SDL goroutine gracefully. Removing may cause deadlock.
 }
