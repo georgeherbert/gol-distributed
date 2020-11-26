@@ -25,7 +25,7 @@ func sendFileName(fileName string, ioCommand chan<- ioCommand, ioFileName chan<-
 	ioFileName <- fileName
 }
 
-// Returns the world with its initial values filled
+// Sends the world with its initial values filled
 func sendWorld(height int, width int, ioInput <-chan uint8, conn net.Conn) {
 	for i := 0; i < height * width; i++ {
 		fmt.Fprintf(conn, "%d\n", <-ioInput)
