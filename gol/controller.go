@@ -120,6 +120,7 @@ func controller(p Params, c distributorChannels) {
 	// Send the world to the server
 	sendWorld(p.ImageHeight, p.ImageWidth, c.ioInput, conn)
 
+	// Report the alive cells until the engine is done
 	done := make(chan bool)
 	go reportAliveCells(c.events, done, reader)
 	<-done

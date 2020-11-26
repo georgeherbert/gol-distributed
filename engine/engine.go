@@ -155,6 +155,8 @@ func main() {
 			completedTurns = turn + 1
 			mutexTurnsWorld.Unlock()
 		}
+
+		// Once it has done all the iterations, send a message to the controller to let it know it is done
 		mutexDone.Lock()
 		done = true
 		fmt.Fprintf(conn, "DONE\n")
