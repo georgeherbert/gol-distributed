@@ -119,7 +119,6 @@ func controller(p Params, c distributorChannels) {
 
 	// Send the world to the server
 	sendWorld(p.ImageHeight, p.ImageWidth, c.ioInput, conn)
-
 	// Report the alive cells until the engine is done
 	done := make(chan bool)
 	go reportAliveCells(c.events, done, reader)
@@ -134,6 +133,7 @@ func controller(p Params, c distributorChannels) {
 		CompletedTurns: p.Turns,
 		Alive:          aliveCells,
 	}
+	writeFile(world, fileName, p.Turns, c.ioCommand, c.ioFileName, c.ioOutput, c.events)
 	c.ioCommand <- ioCheckIdle // Make sure that the Io has finished any output before exiting.
 	<-c.ioIdle
 	c.events <- StateChange{p.Turns, Quitting}
