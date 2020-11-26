@@ -144,38 +144,58 @@ func main() {
 				<-ticker.C
 				mutexDone.Lock()
 				if !done {
-					mutexTurnsWorld.Lock()
 					mutexSending.Lock()
+					mutexTurnsWorld.Lock()
 					fmt.Fprintf(conn, "REPORT_ALIVE\n")
 					fmt.Fprintf(conn, "%d\n", completedTurns)
 					fmt.Fprintf(conn, "%d\n", calcNumAliveCells(world))
-					mutexSending.Unlock()
 					mutexTurnsWorld.Unlock()
+					mutexSending.Unlock()
 				}
 				mutexDone.Unlock()
 			}
 		}()
+		pause := make(chan bool)
 		go func() {
+			paused := false
 			for {
 				action, _ := reader.ReadString('\n')
 				if action == "SAVE\n" {
-					mutexTurnsWorld.Lock()
 					mutexSending.Lock()
+					mutexTurnsWorld.Lock()
 					fmt.Fprintf(conn, "SENDING_WORLD\n")
 					sendWorld(world, conn, completedTurns)
-					mutexSending.Unlock()
 					mutexTurnsWorld.Unlock()
+					mutexSending.Unlock()
 					fmt.Println("Sent World")
 				} else if action == "STOP\n" {
 					fmt.Println("STOP")
 				} else if action == "PAUSE\n"  {
-					fmt.Println("PAUSE")
+					pause <- true
+					mutexSending.Lock()
+					mutexTurnsWorld.Lock()
+					if paused {
+						fmt.Fprintf(conn, "RESUMING\n")
+						paused = false
+					} else {
+						fmt.Fprintf(conn, "PAUSING\n")
+						paused = true
+					}
+					fmt.Fprintf(conn, "%d\n", completedTurns)
+					mutexTurnsWorld.Unlock()
+					mutexSending.Unlock()
+					fmt.Println("Paused/Resumed")
 				} else if action == "RESUME\n" {
 					fmt.Println("RESUME")
 				}
 			}
 		}()
 		for turn = 0; turn < turns; turn++ {
+			select {
+			case <-pause:
+				<-pause
+			default:
+			}
 			mutexTurnsWorld.Lock()
 			world = calcNextState(world)
 			completedTurns = turn + 1
@@ -195,36 +215,3 @@ func main() {
 		fmt.Printf("Computed %d turns of %dx%d\n", completedTurns, height, width)
 	}
 }
-
-//// Distributor divides the work between workers and interacts with other goroutines.
-//func engine(world [][]byte, turns int, turnsChan chan<- int, aliveCellsChan chan<- int) ([][]byte, int) {
-//	var turn int
-//	var completedTurns int
-//	mutexTurnsWorld := &sync.Mutex{}
-//	ticker := time.NewTicker(2 * time.Second)
-//	// Ticker
-//	go func() {
-//		for {
-//			<-ticker.C
-//			mutexTurnsWorld.Lock()
-//			turnsChan <- completedTurns
-//			aliveCellsChan <- calcNumAliveCells(world)
-//			mutexTurnsWorld.Unlock()
-//		}
-//	}()
-//	for turn = 0; turn < turns; turn++ {
-//		mutexTurnsWorld.Lock()
-//		world = calcNextState(world)
-//		completedTurns = turn + 1
-//		mutexTurnsWorld.Unlock()
-//	}
-//	return world, completedTurns
-//}
-
-
-
-
-
-
-
-

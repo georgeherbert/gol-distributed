@@ -35,6 +35,7 @@ const (
 	Paused State = iota
 	Executing
 	Quitting
+	Continuing
 )
 
 // StateChange is an Event notifying the user about the change of state of execution.
@@ -77,6 +78,8 @@ func (state State) String() string {
 		return "Executing"
 	case Quitting:
 		return "Quitting"
+	case Continuing:
+		return "Continuing"
 	default:
 		return "Incorrect State"
 	}

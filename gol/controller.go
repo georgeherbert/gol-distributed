@@ -35,7 +35,6 @@ func sendWorld(height int, width int, ioInput <-chan uint8, conn net.Conn) {
 
 // Manages key presses
 func manageKeyPresses(keyPresses <-chan rune, conn net.Conn) {
-	paused := false
 	for {
 		key := <-keyPresses
 		if key == 115 { // save
@@ -43,12 +42,7 @@ func manageKeyPresses(keyPresses <-chan rune, conn net.Conn) {
 		} else if key == 113 { // stop
 			fmt.Fprintf(conn, "STOP\n")
 		} else if key == 112 { // pause/resume
-			if paused {
-				fmt.Fprintf(conn, "RESUME\n")
-			} else {
-				fmt.Fprintf(conn, "PAUSE\n")
-			}
-			paused = !paused
+			fmt.Fprintf(conn, "PAUSE\n")
 		}
 	}
 }
@@ -65,6 +59,16 @@ func handleEngine(events chan<- Event, reader *bufio.Reader, done chan<- bool, i
 		} else if operation == "SENDING_WORLD\n" {
 			world, completedTurns := receiveWorld(imageHeight, imageWidth, reader)
 			writeFile(world, fileName, completedTurns, ioCommand, ioFileName, ioOutput, events)
+		} else if operation == "PAUSING\n" || operation == "RESUMING\n" {
+			completedTurnsString, _ := reader.ReadString('\n')
+			completedTurns := netStringToInt(completedTurnsString)
+			var newState State
+			if operation == "PAUSING\n" {
+				newState = Paused
+			} else {
+				newState = Continuing
+			}
+			events <- StateChange{completedTurns, newState}
 		}
 	}
 }
