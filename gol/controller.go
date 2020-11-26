@@ -33,10 +33,16 @@ func sendWorld(height int, width int, ioInput <-chan uint8, conn net.Conn) {
 }
 
 // Reports the number of alive cells every time it receives data
-func reportAliveCells(events chan<- Event, turnsChan <-chan int, aliveCellsChan <-chan int) {
+func reportAliveCells(events chan<- Event, done chan<- bool, reader *bufio.Reader) {
 	for {
-		turns := <-turnsChan
-		aliveCells := <-aliveCellsChan
+		turnsString, _ := reader.ReadString('\n')
+		if turnsString == "DONE\n" {
+			done <- true
+			break
+		}
+		aliveCellsString, _ := reader.ReadString('\n')
+		turns := netStringToInt(turnsString)
+		aliveCells := netStringToInt(aliveCellsString)
 		events <- AliveCellsCount{
 			CompletedTurns: turns,
 			CellsCount:     aliveCells,
@@ -102,6 +108,7 @@ func controller(p Params, c distributorChannels) {
 
 	// Dials the engine
 	conn, _ := net.Dial("tcp", "127.0.0.1:8030")
+	reader := bufio.NewReader(conn)
 
 	// Send the image height and width to the server
 	fmt.Fprintf(conn, "%d\n", p.ImageHeight)
@@ -113,10 +120,14 @@ func controller(p Params, c distributorChannels) {
 	// Send the world to the server
 	sendWorld(p.ImageHeight, p.ImageWidth, c.ioInput, conn)
 
-	reader := bufio.NewReader(conn)
+	done := make(chan bool)
+	go reportAliveCells(c.events, done, reader)
+	<-done
+
 	// Receives the world back from the server once all rounds are complete
 	world := receiveWorld(p.ImageHeight, p.ImageWidth, reader)
 
+	// Once the final turn is complete
 	aliveCells := getAliveCells(world)
 	c.events <- FinalTurnComplete{
 		CompletedTurns: p.Turns,

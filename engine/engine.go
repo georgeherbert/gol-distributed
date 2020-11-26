@@ -7,6 +7,7 @@ import (
 	"net"
 	"strconv"
 	"sync"
+	"time"
 )
 
 // Converts a string receives over tcp to an integer
@@ -129,17 +130,38 @@ func main() {
 		turns := netStringToInt(turnsString)
 		world := initialiseWorld(height, width, reader)
 
-		mutexTurnsWorld := &sync.Mutex{}
 		var turn int
-		//var completedTurns int
+		var completedTurns int
+		done := false
+		mutexDone := &sync.Mutex{}
+		mutexTurnsWorld := &sync.Mutex{}
+		ticker := time.NewTicker(2 * time.Second)
+		go func() {
+			for {
+				<-ticker.C
+				mutexDone.Lock()
+				if !done {
+					mutexTurnsWorld.Lock()
+					fmt.Fprintf(conn, "%d\n", completedTurns)
+					fmt.Fprintf(conn, "%d\n", calcNumAliveCells(world))
+					mutexTurnsWorld.Unlock()
+				}
+				mutexDone.Unlock()
+			}
+		}()
 		for turn = 0; turn < turns; turn++ {
 			mutexTurnsWorld.Lock()
 			world = calcNextState(world)
-			//completedTurns = turn + 1
+			completedTurns = turn + 1
 			mutexTurnsWorld.Unlock()
 		}
+		mutexDone.Lock()
+		done = true
+		fmt.Fprintf(conn, "DONE\n")
+		mutexDone.Unlock()
 
 		sendWorld(world, conn)
+		fmt.Println("DONE")
 	}
 }
 
