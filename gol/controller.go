@@ -85,7 +85,7 @@ func controller(p Params, c distributorChannels) {
 	world := initialiseWorld(p.ImageHeight, p.ImageWidth, c.ioInput)
 	turnsChan, aliveCellsChan := make(chan int), make(chan int)
 	go reportAliveCells(c.events, turnsChan, aliveCellsChan)
-	completedWorld, completedTurns := gol(world, p.Turns, turnsChan, aliveCellsChan)
+	completedWorld, completedTurns := engine(world, p.Turns, turnsChan, aliveCellsChan)
 	aliveCells := getAliveCells(completedWorld)
 	c.events <- FinalTurnComplete{
 		CompletedTurns: completedTurns,

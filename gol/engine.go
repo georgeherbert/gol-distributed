@@ -80,7 +80,7 @@ func calcNumAliveCells(world [][]byte) int {
 }
 
 // Distributor divides the work between workers and interacts with other goroutines.
-func gol(world [][]byte, turns int, turnsChan chan<- int, aliveCellsChan chan<- int) ([][]byte, int) {
+func engine(world [][]byte, turns int, turnsChan chan<- int, aliveCellsChan chan<- int) ([][]byte, int) {
 	var turn int
 	var completedTurns int
 	mutexTurnsWorld := &sync.Mutex{}
