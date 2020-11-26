@@ -26,7 +26,7 @@ func TestAlive(t *testing.T) {
 
 	implemented := make(chan bool)
 	go func() {
-		timer := time.After(5 * time.Second)
+		timer := time.After(10 * time.Second)
 		select {
 		case <-timer:
 			t.Fatal("no AliveCellsCount events received in 5 seconds")
