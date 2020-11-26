@@ -1,6 +1,10 @@
 package gol
 
 import (
+	"bufio"
+	"fmt"
+	"net"
+
 	//"fmt"
 	"strconv"
 	"uk.ac.bris.cs/gameoflife/util"
@@ -22,18 +26,10 @@ func sendFileName(fileName string, ioCommand chan<- ioCommand, ioFileName chan<-
 }
 
 // Returns the world with its initial values filled
-func initialiseWorld(height int, width int, ioInput <-chan uint8) [][]byte {
-	world := make([][]byte, height)
-	for y := range world {
-		world[y] = make([]byte, width)
+func sendWorld(height int, width int, ioInput <-chan uint8, conn net.Conn) {
+	for i := 0; i < height * width; i++ {
+		fmt.Fprintf(conn, "%d\n", <-ioInput)
 	}
-	for y, row := range world {
-		for x := range row {
-			cell := <-ioInput
-			world[y][x] = cell
-		}
-	}
-	return world
 }
 
 // Reports the number of alive cells every time it receives data
@@ -46,6 +42,27 @@ func reportAliveCells(events chan<- Event, turnsChan <-chan int, aliveCellsChan 
 			CellsCount:     aliveCells,
 		}
 	}
+}
+
+// Converts a string receives over tcp to an integer
+func netStringToInt(netString string) int {
+	integer, _ := strconv.Atoi(netString[:len(netString) - 1])
+	return integer
+}
+
+func receiveWorld(height int, width int, reader *bufio.Reader) [][]byte {
+	world := make([][]byte, height)
+	for y := range world {
+		world[y] = make([]byte, width)
+	}
+	for y, row := range world {
+		for x := range row {
+			msg, _ := reader.ReadString('\n')
+			cell := netStringToInt(msg)
+			world[y][x] = byte(cell)
+		}
+	}
+	return world
 }
 
 // Returns a slice of alive cells
@@ -82,18 +99,47 @@ func writeFile(world [][]byte, fileName string, turns int, ioCommand chan<- ioCo
 func controller(p Params, c distributorChannels) {
 	fileName := strconv.Itoa(p.ImageWidth) + "x" + strconv.Itoa(p.ImageHeight)
 	sendFileName(fileName, c.ioCommand, c.ioFileName)
-	world := initialiseWorld(p.ImageHeight, p.ImageWidth, c.ioInput)
-	turnsChan, aliveCellsChan := make(chan int), make(chan int)
-	go reportAliveCells(c.events, turnsChan, aliveCellsChan)
-	completedWorld, completedTurns := engine(world, p.Turns, turnsChan, aliveCellsChan)
-	aliveCells := getAliveCells(completedWorld)
+
+	// Dials the engine
+	conn, _ := net.Dial("tcp", "127.0.0.1:8030")
+
+	// Send the image height and width to the server
+	fmt.Fprintf(conn, "%d\n", p.ImageHeight)
+	fmt.Fprintf(conn, "%d\n", p.ImageWidth)
+
+	// Send the number of turns to the server
+	fmt.Fprintf(conn, "%d\n", p.Turns)
+
+	// Send the world to the server
+	sendWorld(p.ImageHeight, p.ImageWidth, c.ioInput, conn)
+
+	reader := bufio.NewReader(conn)
+	// Receives the world back from the server once all rounds are complete
+	world := receiveWorld(p.ImageHeight, p.ImageWidth, reader)
+
+	aliveCells := getAliveCells(world)
 	c.events <- FinalTurnComplete{
-		CompletedTurns: completedTurns,
+		CompletedTurns: p.Turns,
 		Alive:          aliveCells,
 	}
-	writeFile(completedWorld, fileName, completedTurns, c.ioCommand, c.ioFileName, c.ioOutput, c.events)
 	c.ioCommand <- ioCheckIdle // Make sure that the Io has finished any output before exiting.
 	<-c.ioIdle
-	c.events <- StateChange{completedTurns, Quitting}
+	c.events <- StateChange{p.Turns, Quitting}
 	close(c.events) // Close the channel to stop the SDL goroutine gracefully. Removing may cause deadlock.
+
+	//world := initialiseWorld(p.ImageHeight, p.ImageWidth, c.ioInput)
+	//
+	//turnsChan, aliveCellsChan := make(chan int), make(chan int)
+	//go reportAliveCells(c.events, turnsChan, aliveCellsChan)
+	//completedWorld, completedTurns := engine(world, p.Turns, turnsChan, aliveCellsChan)
+	//aliveCells := getAliveCells(completedWorld)
+	//c.events <- FinalTurnComplete{
+	//	CompletedTurns: completedTurns,
+	//	Alive:          aliveCells,
+	//}
+	////writeFile(completedWorld, fileName, completedTurns, c.ioCommand, c.ioFileName, c.ioOutput, c.events)
+	//c.ioCommand <- ioCheckIdle // Make sure that the Io has finished any output before exiting.
+	//<-c.ioIdle
+	//c.events <- StateChange{completedTurns, Quitting}
+	//close(c.events) // Close the channel to stop the SDL goroutine gracefully. Removing may cause deadlock.
 }
