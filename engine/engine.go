@@ -120,8 +120,8 @@ func main() {
 	ln, _ := net.Listen("tcp", *portPtr)
 	for {
 		conn, _ := ln.Accept()
-
 		reader := bufio.NewReader(conn)
+
 		heightString, _ := reader.ReadString('\n')
 		widthString, _ := reader.ReadString('\n')
 		turnsString, _ := reader.ReadString('\n')
@@ -129,6 +129,7 @@ func main() {
 		width := netStringToInt(widthString)
 		turns := netStringToInt(turnsString)
 		world := initialiseWorld(height, width, reader)
+		fmt.Printf("Received %dx%d\n", height, width)
 
 		var turn int
 		var completedTurns int
@@ -162,8 +163,9 @@ func main() {
 		fmt.Fprintf(conn, "DONE\n")
 		mutexDone.Unlock()
 
+		// Send the world back to the controller
 		sendWorld(world, conn)
-		fmt.Println("DONE")
+		fmt.Printf("Computed %d turns of %dx%d\n", completedTurns, height, width)
 	}
 }
 

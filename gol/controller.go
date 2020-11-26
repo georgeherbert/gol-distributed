@@ -17,6 +17,7 @@ type distributorChannels struct {
 	ioFileName chan<- string
 	ioOutput   chan<- uint8
 	ioInput    <-chan uint8
+	keyPresses <-chan rune
 }
 
 // Sends the file name to io.go so the world can be initialised
@@ -29,6 +30,17 @@ func sendFileName(fileName string, ioCommand chan<- ioCommand, ioFileName chan<-
 func sendWorld(height int, width int, ioInput <-chan uint8, conn net.Conn) {
 	for i := 0; i < height * width; i++ {
 		fmt.Fprintf(conn, "%d\n", <-ioInput)
+	}
+}
+
+// Manages key presses
+func manageKeyPresses(keyPresses <-chan rune) {
+	for {
+		key := <-keyPresses
+		if key == 115 { // save
+		} else if key == 113 { // stop
+		} else if key == 112 { // pause/resume
+		}
 	}
 }
 
@@ -106,22 +118,19 @@ func controller(p Params, c distributorChannels) {
 	fileName := strconv.Itoa(p.ImageWidth) + "x" + strconv.Itoa(p.ImageHeight)
 	sendFileName(fileName, c.ioCommand, c.ioFileName)
 
-	// Dials the engine
+	// Dials the engine and establishes reader
 	conn, _ := net.Dial("tcp", "127.0.0.1:8030")
 	reader := bufio.NewReader(conn)
 
-	// Send the image height and width to the server
-	fmt.Fprintf(conn, "%d\n", p.ImageHeight)
-	fmt.Fprintf(conn, "%d\n", p.ImageWidth)
+	fmt.Fprintf(conn, "%d\n", p.ImageHeight) // Send image height to server
+	fmt.Fprintf(conn, "%d\n", p.ImageWidth) // Send image width to server
+	fmt.Fprintf(conn, "%d\n", p.Turns) // Send number of turns to server
 
-	// Send the number of turns to the server
-	fmt.Fprintf(conn, "%d\n", p.Turns)
+	sendWorld(p.ImageHeight, p.ImageWidth, c.ioInput, conn) // Send the world to the server
+	done := make(chan bool) // Used to stop execution until the turns are done executing
 
-	// Send the world to the server
-	sendWorld(p.ImageHeight, p.ImageWidth, c.ioInput, conn)
-	// Report the alive cells until the engine is done
-	done := make(chan bool)
-	go reportAliveCells(c.events, done, reader)
+	go manageKeyPresses(c.keyPresses)
+	go reportAliveCells(c.events, done, reader) // Report the alive cells until the engine is done
 	<-done
 
 	// Receives the world back from the server once all rounds are complete
