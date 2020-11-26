@@ -150,6 +150,20 @@ func main() {
 				mutexDone.Unlock()
 			}
 		}()
+		go func() {
+			for {
+				action, _ := reader.ReadString('\n')
+				if action == "SAVE\n" {
+					fmt.Println("SAVE")
+				} else if action == "STOP\n" {
+					fmt.Println("STOP")
+				} else if action == "PAUSE\n"  {
+					fmt.Println("PAUSE")
+				} else if action == "RESUME\n" {
+					fmt.Println("RESUME")
+				}
+			}
+		}()
 		for turn = 0; turn < turns; turn++ {
 			mutexTurnsWorld.Lock()
 			world = calcNextState(world)

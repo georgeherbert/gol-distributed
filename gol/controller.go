@@ -34,12 +34,21 @@ func sendWorld(height int, width int, ioInput <-chan uint8, conn net.Conn) {
 }
 
 // Manages key presses
-func manageKeyPresses(keyPresses <-chan rune) {
+func manageKeyPresses(keyPresses <-chan rune, conn net.Conn) {
+	paused := false
 	for {
 		key := <-keyPresses
 		if key == 115 { // save
+			fmt.Fprintf(conn, "SAVE\n")
 		} else if key == 113 { // stop
+			fmt.Fprintf(conn, "STOP\n")
 		} else if key == 112 { // pause/resume
+			if paused {
+				fmt.Fprintf(conn, "RESUME\n")
+			} else {
+				fmt.Fprintf(conn, "PAUSE\n")
+			}
+			paused = !paused
 		}
 	}
 }
@@ -129,7 +138,7 @@ func controller(p Params, c distributorChannels) {
 	sendWorld(p.ImageHeight, p.ImageWidth, c.ioInput, conn) // Send the world to the server
 	done := make(chan bool) // Used to stop execution until the turns are done executing
 
-	go manageKeyPresses(c.keyPresses)
+	go manageKeyPresses(c.keyPresses, conn)
 	go reportAliveCells(c.events, done, reader) // Report the alive cells until the engine is done
 	<-done
 
