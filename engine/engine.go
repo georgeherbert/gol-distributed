@@ -120,9 +120,25 @@ func main() {
 	portPtr := flag.String("port", ":8030", "port to listen on")
 	ln, _ := net.Listen("tcp", *portPtr)
 	for {
-		conn, _ := ln.Accept()
-		reader := bufio.NewReader(conn)
-
+		var conn net.Conn
+		var reader *bufio.Reader
+		establishedConnection := make(chan bool)
+		mutexSending := &sync.Mutex{} // Used whenever sending to client to stop multiple things being sent at once and to stop a new connection joining half way between sending stuff
+		go func() {
+			for {
+				newConn, _ := ln.Accept()
+				mutexSending.Lock()
+				conn = newConn
+				reader = bufio.NewReader(conn)
+				mutexSending.Unlock()
+				connectionType, _ := reader.ReadString('\n')
+				if connectionType == "INITIALISE\n" {
+					establishedConnection <- true
+				}
+				fmt.Println("New Connection Established")
+			}
+		}()
+		<- establishedConnection
 		heightString, _ := reader.ReadString('\n')
 		widthString, _ := reader.ReadString('\n')
 		turnsString, _ := reader.ReadString('\n')
@@ -137,7 +153,6 @@ func main() {
 		done := false
 		mutexDone := &sync.Mutex{}
 		mutexTurnsWorld := &sync.Mutex{}
-		mutexSending := &sync.Mutex{} // Used whenever sending data to client to stop multiple things being sent at once
 		ticker := time.NewTicker(2 * time.Second)
 		go func() {
 			for {
@@ -206,7 +221,9 @@ func main() {
 		// Once it has done all the iterations, send a message to the controller to let it know it is done
 		mutexDone.Lock()
 		done = true
+		mutexSending.Lock()
 		fmt.Fprintf(conn, "DONE\n")
+		mutexSending.Unlock()
 		mutexDone.Unlock()
 
 		// Send the world back to the controller

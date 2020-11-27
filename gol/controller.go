@@ -148,6 +148,8 @@ func controller(p Params, c distributorChannels) {
 	fileName := strconv.Itoa(p.ImageWidth) + "x" + strconv.Itoa(p.ImageHeight)
 
 	if p.Rejoin == false {
+		fmt.Fprintf(conn, "INITIALISE\n")
+
 		sendFileName(fileName, c.ioCommand, c.ioFileName)
 
 		fmt.Fprintf(conn, "%d\n", p.ImageHeight) // Send image height to server
