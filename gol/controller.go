@@ -173,7 +173,6 @@ func controller(p Params, c distributorChannels) {
 		<-c.ioIdle
 		c.events <- StateChange{completedTurns, Quitting}
 	case <-quit:
-		// Should get an updated value for completed turns here ideally
 	}
 	close(c.events) // Close the channel to stop the SDL goroutine gracefully. Removing may cause deadlock.
 }
