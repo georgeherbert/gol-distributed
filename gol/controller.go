@@ -34,13 +34,14 @@ func sendWorld(height int, width int, ioInput <-chan uint8, conn net.Conn) {
 }
 
 // Manages key presses
-func manageKeyPresses(keyPresses <-chan rune, conn net.Conn) {
+func manageKeyPresses(keyPresses <-chan rune, quit chan<- bool, conn net.Conn) {
 	for {
 		key := <-keyPresses
 		if key == 115 { // save
 			fmt.Fprintf(conn, "SAVE\n")
 		} else if key == 113 { // stop
 			fmt.Fprintf(conn, "STOP\n")
+			quit <- true
 		} else if key == 112 { // pause/resume
 			fmt.Fprintf(conn, "PAUSE\n")
 		}
@@ -152,23 +153,27 @@ func controller(p Params, c distributorChannels) {
 
 	sendWorld(p.ImageHeight, p.ImageWidth, c.ioInput, conn) // Send the world to the server
 
-	go manageKeyPresses(c.keyPresses, conn)
+	quit := make(chan bool)
+	go manageKeyPresses(c.keyPresses, quit, conn)
 	done := make(chan bool) // Used to stop execution until the turns are done executing otherwise receiveWorld will start trying to receive
 	go handleEngine(c.events, reader, done, p.ImageHeight, p.ImageWidth, fileName, c.ioCommand, c.ioFileName, c.ioOutput) // Report the alive cells until the engine is done
-	<-done
+	select {
+	case <-done:
+		// Receives the world back from the server once all rounds are complete
+		world, completedTurns := receiveWorld(p.ImageHeight, p.ImageWidth, reader)
 
-	// Receives the world back from the server once all rounds are complete
-	world, completedTurns := receiveWorld(p.ImageHeight, p.ImageWidth, reader)
-
-	// Once the final turn is complete
-	aliveCells := getAliveCells(world)
-	c.events <- FinalTurnComplete{
-		CompletedTurns: completedTurns,
-		Alive:          aliveCells,
+		// Once the final turn is complete
+		aliveCells := getAliveCells(world)
+		c.events <- FinalTurnComplete{
+			CompletedTurns: completedTurns,
+			Alive:          aliveCells,
+		}
+		writeFile(world, fileName, completedTurns, c.ioCommand, c.ioFileName, c.ioOutput, c.events)
+		c.ioCommand <- ioCheckIdle // Make sure that the Io has finished any output before exiting.
+		<-c.ioIdle
+		c.events <- StateChange{completedTurns, Quitting}
+	case <-quit:
+		// Should get an updated value for completed turns here ideally
 	}
-	writeFile(world, fileName, completedTurns, c.ioCommand, c.ioFileName, c.ioOutput, c.events)
-	c.ioCommand <- ioCheckIdle // Make sure that the Io has finished any output before exiting.
-	<-c.ioIdle
-	c.events <- StateChange{completedTurns, Quitting}
 	close(c.events) // Close the channel to stop the SDL goroutine gracefully. Removing may cause deadlock.
 }

@@ -146,6 +146,7 @@ func main() {
 				if !done {
 					mutexSending.Lock()
 					mutexTurnsWorld.Lock()
+					fmt.Printf("%d Turns Completed\n", completedTurns)
 					fmt.Fprintf(conn, "REPORT_ALIVE\n")
 					fmt.Fprintf(conn, "%d\n", completedTurns)
 					fmt.Fprintf(conn, "%d\n", calcNumAliveCells(world))
