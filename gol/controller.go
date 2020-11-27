@@ -40,7 +40,7 @@ func manageKeyPresses(keyPresses <-chan rune, quit chan<- bool, conn net.Conn) {
 		if key == 115 { // save
 			fmt.Fprintf(conn, "SAVE\n")
 		} else if key == 113 { // stop
-			fmt.Fprintf(conn, "STOP\n")
+			fmt.Fprintf(conn, "QUIT\n")
 			quit <- true
 		} else if key == 112 { // pause/resume
 			fmt.Fprintf(conn, "PAUSE\n")
@@ -140,22 +140,26 @@ func writeFile(world [][]byte, fileName string, turns int, ioCommand chan<- ioCo
 
 // Distributor divides the work between workers and interacts with other goroutines.
 func controller(p Params, c distributorChannels) {
-	fileName := strconv.Itoa(p.ImageWidth) + "x" + strconv.Itoa(p.ImageHeight)
-	sendFileName(fileName, c.ioCommand, c.ioFileName)
-
 	// Dials the engine and establishes reader
 	conn, _ := net.Dial("tcp", "127.0.0.1:8030")
 	reader := bufio.NewReader(conn)
 
-	fmt.Fprintf(conn, "%d\n", p.ImageHeight) // Send image height to server
-	fmt.Fprintf(conn, "%d\n", p.ImageWidth) // Send image width to server
-	fmt.Fprintf(conn, "%d\n", p.Turns) // Send number of turns to server
+	//TODO: Make it so this doesn't have to be specified when reconnecting
+	fileName := strconv.Itoa(p.ImageWidth) + "x" + strconv.Itoa(p.ImageHeight)
 
-	sendWorld(p.ImageHeight, p.ImageWidth, c.ioInput, conn) // Send the world to the server
+	if p.Rejoin == false {
+		sendFileName(fileName, c.ioCommand, c.ioFileName)
+
+		fmt.Fprintf(conn, "%d\n", p.ImageHeight) // Send image height to server
+		fmt.Fprintf(conn, "%d\n", p.ImageWidth)  // Send image width to server
+		fmt.Fprintf(conn, "%d\n", p.Turns)       // Send number of turns to server
+
+		sendWorld(p.ImageHeight, p.ImageWidth, c.ioInput, conn) // Send the world to the server
+	}
 
 	quit := make(chan bool)
 	go manageKeyPresses(c.keyPresses, quit, conn)
-	done := make(chan bool) // Used to stop execution until the turns are done executing otherwise receiveWorld will start trying to receive
+	done := make(chan bool)                                                                                               // Used to stop execution until the turns are done executing otherwise receiveWorld will start trying to receive
 	go handleEngine(c.events, reader, done, p.ImageHeight, p.ImageWidth, fileName, c.ioCommand, c.ioFileName, c.ioOutput) // Report the alive cells until the engine is done
 	select {
 	case <-done:

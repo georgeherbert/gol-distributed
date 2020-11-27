@@ -169,8 +169,8 @@ func main() {
 					mutexTurnsWorld.Unlock()
 					mutexSending.Unlock()
 					fmt.Println("Sent World")
-				} else if action == "STOP\n" {
-					fmt.Println("STOP")
+				} else if action == "QUIT\n" {
+					fmt.Println("QUIT")
 				} else if action == "PAUSE\n"  {
 					pause <- true
 					mutexSending.Lock()

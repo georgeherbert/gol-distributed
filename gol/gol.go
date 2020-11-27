@@ -6,6 +6,7 @@ type Params struct {
 	Threads     int
 	ImageWidth  int
 	ImageHeight int
+	Rejoin 		bool
 }
 
 // Run starts the processing of Game of Life. It should initialise channels and goroutines.

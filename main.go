@@ -37,6 +37,12 @@ func main() {
 		10000000000,
 		"Specify the number of turns to process. Defaults to 10000000000.")
 
+	flag.BoolVar(
+		&params.Rejoin,
+		"rejoin",
+		false,
+		"Specify whether you are trying to rejoin a GoL board that is currently executing.")
+
 	flag.Parse()
 
 	fmt.Println("Threads:", params.Threads)
