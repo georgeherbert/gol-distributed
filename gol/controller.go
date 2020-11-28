@@ -136,6 +136,7 @@ func writeFile(world [][]byte, fileName string, turns int, ioCommand chan<- ioCo
 	}
 }
 
+//TODO: Look into bufio Writer https://medium.com/golangspec/introduction-to-bufio-package-in-golang-ad7d1877f762
 // Distributor divides the work between workers and interacts with other goroutines.
 func controller(p Params, c distributorChannels) {
 	// Dials the engine and establishes reader
