@@ -44,6 +44,12 @@ func sendWorldToWorker(height int, width int, worker net.Conn, messages <-chan s
 	}
 }
 
+func sendToAllControllers(controllers *[]net.Conn, value string) {
+	for _, conn := range *controllers {
+		fmt.Fprintf(conn, value)
+	}
+}
+
 // Sends the number of alive cells every 2 seconds
 func ticker(mutexDone *sync.Mutex, done *bool, mutexControllers *sync.Mutex, mutexTurnsWorld *sync.Mutex,
 	completedTurns *int, controllers *[]net.Conn, numAliveCells *int) {
@@ -56,11 +62,9 @@ func ticker(mutexDone *sync.Mutex, done *bool, mutexControllers *sync.Mutex, mut
 				mutexControllers.Lock()
 				mutexTurnsWorld.Lock()
 				fmt.Printf("%d Turns Completed\n", *completedTurns)
-				for _, conn := range *controllers {
-					fmt.Fprintf(conn, "REPORT_ALIVE\n")
-					fmt.Fprintf(conn, "%d\n", *completedTurns)
-					fmt.Fprintf(conn, "%d\n", *numAliveCells)
-				}
+				sendToAllControllers(controllers, "REPORT_ALIVE\n")
+				sendToAllControllers(controllers, fmt.Sprintf("%d\n", *completedTurns))
+				sendToAllControllers(controllers, fmt.Sprintf("%d\n", *numAliveCells))
 				mutexTurnsWorld.Unlock()
 				mutexControllers.Unlock()
 			} else {
@@ -82,18 +86,12 @@ func handleKeyPresses(messagesController <-chan string, mutexControllers *sync.M
 			mutexControllers.Lock()
 			mutexTurnsWorld.Lock()
 			if paused {
-				for _, conn := range *controllers {
-					fmt.Fprintf(conn, "RESUMING\n")
-				}
+				sendToAllControllers(controllers, "RESUMING\n")
 			} else {
-				for _, conn := range *controllers {
-					fmt.Fprintf(conn, "PAUSING\n")
-				}
+				sendToAllControllers(controllers, "PAUSING\n")
 			}
 			paused = !paused
-			for _, conn := range *controllers {
-				fmt.Fprintf(conn, "%d\n", *completedTurns)
-			}
+			sendToAllControllers(controllers, fmt.Sprintf("%d\n", *completedTurns))
 			mutexTurnsWorld.Unlock()
 			mutexControllers.Unlock()
 			fmt.Println("Paused/Resumed")
@@ -112,7 +110,7 @@ func handleKeyPresses(messagesController <-chan string, mutexControllers *sync.M
 				mutexControllers.Unlock()
 				fmt.Println("Sent World")
 			} else if action == "QUIT\n" {
-				fmt.Println("A connection has quit")
+				fmt.Println("A controller has quit")
 			}  else if action == "DONE\n" {
 				break
 			}
@@ -235,9 +233,7 @@ func main() {
 			mutexDone.Lock()
 			done = true
 			mutexControllers.Lock()
-			for _, conn := range *controllers {
-				fmt.Fprintf(conn, "DONE\n")
-			}
+			sendToAllControllers(controllers, "DONE\n")
 			mutexControllers.Unlock()
 			mutexDone.Unlock()
 			// Send the world back to the controller
