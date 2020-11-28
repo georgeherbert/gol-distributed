@@ -121,13 +121,19 @@ func main() {
 	ln, _ := net.Listen("tcp", *portPtr)
 
 	var conn net.Conn
+	mutexSending := &sync.Mutex{} // Used whenever sending data to client to stop multiple things being sent at once
+	go func(){
+		for {
+			newConn, _ := ln.Accept()
+			mutexSending.Lock()
+			conn = newConn
+			mutexSending.Unlock()
+		}
+	}()
 
+	//TODO: Find a way to stop this running until connection is established
 	for {
-		conn, _ = ln.Accept()
 		reader := bufio.NewReader(conn)
-
-		initialiseOrRejoin, _ := reader.ReadString('\n')
-		fmt.Println(initialiseOrRejoin)
 
 		heightString, _ := reader.ReadString('\n')
 		widthString, _ := reader.ReadString('\n')
@@ -143,7 +149,6 @@ func main() {
 		done := false
 		mutexDone := &sync.Mutex{}
 		mutexTurnsWorld := &sync.Mutex{}
-		mutexSending := &sync.Mutex{} // Used whenever sending data to client to stop multiple things being sent at once
 		ticker := time.NewTicker(2 * time.Second)
 		go func() {
 			for {
@@ -219,7 +224,9 @@ func main() {
 
 		// Send the world back to the controller
 		mutexSending.Lock()
+		mutexTurnsWorld.Lock()
 		sendWorld(world, conn, completedTurns)
+		mutexTurnsWorld.Unlock()
 		mutexSending.Unlock()
 		fmt.Printf("Computed %d turns of %dx%d\n", completedTurns, height, width)
 	}
