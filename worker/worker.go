@@ -133,7 +133,6 @@ func main() {
 		widthString := <-messages
 		height := netStringToInt(heightString)
 		width := netStringToInt(widthString)
-
 		world := initialiseWorld(height, width, messages)
 		for {
 			world = calcNextState(world)
@@ -143,6 +142,8 @@ func main() {
 			status := <-messages
 			if status == "DONE\n" {
 				break
+			} else if status == "SEND_WORLD\n" {
+				sendWorldToEngine(engine, world)
 			}
 		}
 		sendWorldToEngine(engine, world)

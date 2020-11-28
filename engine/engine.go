@@ -73,23 +73,11 @@ func ticker(mutexDone *sync.Mutex, done *bool, mutexControllers *sync.Mutex, mut
 
 // Received key presses from the controller and processes them
 func handleKeyPresses(messagesController <-chan string, mutexControllers *sync.Mutex, mutexTurnsWorld *sync.Mutex,
-	controllers *[]net.Conn, world *[][]byte, completedTurns *int, pause chan<- bool) {
+	controllers *[]net.Conn, world *[][]byte, completedTurns *int, pause chan<- bool, send chan bool) {
 	paused := false
 	for {
 		action := <-messagesController
-		if action == "SAVE\n" {
-			mutexControllers.Lock()
-			mutexTurnsWorld.Lock()
-			for _, conn := range *controllers {
-				fmt.Fprintf(conn, "SENDING_WORLD\n")
-				sendWorld(*world, conn, *completedTurns)
-			}
-			mutexTurnsWorld.Unlock()
-			mutexControllers.Unlock()
-			fmt.Println("Sent World")
-		} else if action == "QUIT\n" {
-			fmt.Println("A connection has quit")
-		} else if action == "PAUSE\n" {
+		if action == "PAUSE\n" {
 			pause <- true
 			mutexControllers.Lock()
 			mutexTurnsWorld.Lock()
@@ -97,23 +85,37 @@ func handleKeyPresses(messagesController <-chan string, mutexControllers *sync.M
 				for _, conn := range *controllers {
 					fmt.Fprintf(conn, "RESUMING\n")
 				}
-				paused = false
 			} else {
 				for _, conn := range *controllers {
 					fmt.Fprintf(conn, "PAUSING\n")
 				}
-				paused = true
 			}
+			paused = !paused
 			for _, conn := range *controllers {
 				fmt.Fprintf(conn, "%d\n", *completedTurns)
 			}
 			mutexTurnsWorld.Unlock()
 			mutexControllers.Unlock()
 			fmt.Println("Paused/Resumed")
-		} else if action == "RESUME\n" {
-			fmt.Println("RESUME")
-		} else if action == "DONE\n" {
-			break
+		}
+		if !paused {
+			if action == "SAVE\n" {
+				send <- true
+				<-send // Once ready to send, a value will be sent back in this channel
+				mutexControllers.Lock()
+				mutexTurnsWorld.Lock()
+				for _, conn := range *controllers {
+					fmt.Fprintf(conn, "SENDING_WORLD\n")
+					sendWorld(*world, conn, *completedTurns)
+				}
+				mutexTurnsWorld.Unlock()
+				mutexControllers.Unlock()
+				fmt.Println("Sent World")
+			} else if action == "QUIT\n" {
+				fmt.Println("A connection has quit")
+			}  else if action == "DONE\n" {
+				break
+			}
 		}
 	}
 }
@@ -184,7 +186,7 @@ func main() {
 			height, width, turns := netStringToInt(heightString), netStringToInt(widthString), netStringToInt(turnsString)
 			done := false
 			mutexDone := &sync.Mutex{}
-			var completedTurns int
+			completedTurns := 0
 			mutexTurnsWorld := &sync.Mutex{}
 			var world [][]byte // temporary while setting up worker
 			if turns > 0 {     // If there are more than 0 turns, process them
@@ -195,7 +197,8 @@ func main() {
 				numAliveCells := 0
 				go ticker(mutexDone, &done, mutexControllers, mutexTurnsWorld, &completedTurns, controllers, &numAliveCells)
 				pause := make(chan bool)
-				go handleKeyPresses(messagesController, mutexControllers, mutexTurnsWorld, controllers, &world, &completedTurns, pause)
+				send := make(chan bool)
+				go handleKeyPresses(messagesController, mutexControllers, mutexTurnsWorld, controllers, &world, &completedTurns, pause, send)
 				for turn := 0; turn < turns; turn++ {
 					select {
 					case <-pause:
@@ -206,17 +209,24 @@ func main() {
 					numAliveCellsString := <-messagesWorker
 					numAliveCells = netStringToInt(numAliveCellsString)
 					completedTurns = turn + 1
-					if completedTurns != turns {
-						fmt.Fprintf(worker, "CONTINUE\n")
-					} else {
-						fmt.Fprintf(worker, "DONE\n")
+					select {
+					case <-send:
+						fmt.Fprintf(worker, "SEND_WORLD\n")
+						world = receiveWorldFromWorker(height, width, messagesWorker)
+						send <- true
+					default:
+						if completedTurns != turns {
+							fmt.Fprintf(worker, "CONTINUE\n")
+						} else {
+							fmt.Fprintf(worker, "DONE\n")
+						}
 					}
 					mutexTurnsWorld.Unlock()
 				}
 				mutexTurnsWorld.Lock()
 				world = receiveWorldFromWorker(height, width, messagesWorker)
 				mutexTurnsWorld.Unlock()
-			} else {
+			} else { // If turns == 0, just initialise the world variable as the values from the controller
 				mutexTurnsWorld.Lock()
 				world = initialiseWorld(height, width, messagesController)
 				mutexTurnsWorld.Unlock()
