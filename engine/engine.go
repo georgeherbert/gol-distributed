@@ -106,12 +106,8 @@ func main() {
 
 	for {
 		if <-messagesController == "INITIALISE\n" { // This stops a new connection attempting to rejoin once all turns are complete breaking the engine
-			heightString, _ := <-messagesController
-			widthString, _ := <-messagesController
-			turnsString, _ := <-messagesController
-			height := netStringToInt(heightString)
-			width := netStringToInt(widthString)
-			turns := netStringToInt(turnsString)
+			heightString, widthString, turnsString := <-messagesController, <-messagesController, <-messagesController
+			height, width, turns := netStringToInt(heightString), netStringToInt(widthString), netStringToInt(turnsString)
 
 			done := false
 			mutexDone := &sync.Mutex{}
