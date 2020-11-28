@@ -128,21 +128,32 @@ func sendWorld(world [][]byte, conn net.Conn, completedTurns int) {
 }
 
 func main() {
-	portPtr := flag.String("port", ":8030", "port to listen on")
-	ln, _ := net.Listen("tcp", *portPtr)
+	portControllerPtr := flag.String("port_controller", ":8030", "port to listen on for controllers")
+	portWorkerPtr := flag.String("port_worker", ":8040", "port to listen on")
+	flag.Parse()
+	lnController, _ := net.Listen("tcp", *portControllerPtr)
 	messages := make(chan string)
-	mutexSending := &sync.Mutex{} // Used whenever sending data to client to stop multiple things being sent at once
+	mutexControllers := &sync.Mutex{} // Used whenever sending data to client to stop multiple things being sent at once
 	var controllers []net.Conn
 	go func() {
 		for {
-			conn, _ := ln.Accept()
-			fmt.Println("New connection")
-			go handleController(conn, messages)
-			mutexSending.Lock()
-			controllers = append(controllers, conn)
-			mutexSending.Unlock()
+			controller, _ := lnController.Accept()
+			fmt.Println("New controller")
+			go handleController(controller, messages)
+			mutexControllers.Lock()
+			controllers = append(controllers, controller)
+			mutexControllers.Unlock()
 		}
 	}()
+
+	// Workers stuff
+	lnWorker, _ := net.Listen("tcp", *portWorkerPtr)
+	var workers []net.Conn
+	worker, _ := lnWorker.Accept()
+	fmt.Println("New worker")
+	workers = append(workers, worker)
+
+
 	for {
 		if <-messages == "INITIALISE\n" { // This stops a new connection attempting to rejoin once all turns are complete breaking the engine
 			heightString, _ := <-messages
@@ -164,7 +175,7 @@ func main() {
 					<-ticker.C
 					mutexDone.Lock()
 					if !done {
-						mutexSending.Lock()
+						mutexControllers.Lock()
 						mutexTurnsWorld.Lock()
 						fmt.Printf("%d Turns Completed\n", completedTurns)
 						for _, conn := range controllers {
@@ -173,7 +184,9 @@ func main() {
 							fmt.Fprintf(conn, "%d\n", calcNumAliveCells(world))
 						}
 						mutexTurnsWorld.Unlock()
-						mutexSending.Unlock()
+						mutexControllers.Unlock()
+					} else {
+						break
 					}
 					mutexDone.Unlock()
 				}
@@ -184,7 +197,7 @@ func main() {
 				for {
 					action := <-messages
 					if action == "SAVE\n" {
-						mutexSending.Lock()
+						mutexControllers.Lock()
 						mutexTurnsWorld.Lock()
 						for _, conn := range controllers {
 							fmt.Fprintf(conn, "SENDING_WORLD\n")
@@ -193,13 +206,13 @@ func main() {
 							sendWorld(world, conn, completedTurns)
 						}
 						mutexTurnsWorld.Unlock()
-						mutexSending.Unlock()
+						mutexControllers.Unlock()
 						fmt.Println("Sent World")
 					} else if action == "QUIT\n" {
 						fmt.Println("A connection has quit")
 					} else if action == "PAUSE\n" {
 						pause <- true
-						mutexSending.Lock()
+						mutexControllers.Lock()
 						mutexTurnsWorld.Lock()
 						if paused {
 							for _, conn := range controllers {
@@ -216,7 +229,7 @@ func main() {
 							fmt.Fprintf(conn, "%d\n", completedTurns)
 						}
 						mutexTurnsWorld.Unlock()
-						mutexSending.Unlock()
+						mutexControllers.Unlock()
 						fmt.Println("Paused/Resumed")
 					} else if action == "RESUME\n" {
 						fmt.Println("RESUME")
@@ -239,22 +252,22 @@ func main() {
 			// Once it has done all the iterations, send a message to the controller to let it know it is done
 			mutexDone.Lock()
 			done = true
-			mutexSending.Lock()
+			mutexControllers.Lock()
 			for _, conn := range controllers {
 				fmt.Fprintf(conn, "DONE\n")
 			}
-			mutexSending.Unlock()
+			mutexControllers.Unlock()
 			mutexDone.Unlock()
 			// Send the world back to the controller
-			mutexSending.Lock()
+			mutexControllers.Lock()
 			for _, conn := range controllers {
 				sendWorld(world, conn, completedTurns)
 			}
-			mutexSending.Unlock()
+			mutexControllers.Unlock()
 			fmt.Printf("Computed %d turns of %dx%d\n", completedTurns, height, width)
-			mutexSending.Lock()
+			mutexControllers.Lock()
 			controllers = []net.Conn{} // Clear the controllers once processing the current board is finished
-			mutexSending.Unlock()
+			mutexControllers.Unlock()
 		}
 	}
 }
