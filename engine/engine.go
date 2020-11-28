@@ -132,14 +132,14 @@ func main() {
 	ln, _ := net.Listen("tcp", *portPtr)
 	messages := make(chan string)
 	mutexSending := &sync.Mutex{} // Used whenever sending data to client to stop multiple things being sent at once
-	var connections []net.Conn
+	var controllers []net.Conn
 	go func() {
 		for {
 			conn, _ := ln.Accept()
 			fmt.Println("New connection")
 			go handleController(conn, messages)
 			mutexSending.Lock()
-			connections = append(connections, conn)
+			controllers = append(controllers, conn)
 			mutexSending.Unlock()
 		}
 	}()
@@ -167,7 +167,7 @@ func main() {
 						mutexSending.Lock()
 						mutexTurnsWorld.Lock()
 						fmt.Printf("%d Turns Completed\n", completedTurns)
-						for _, conn := range connections {
+						for _, conn := range controllers {
 							fmt.Fprintf(conn, "REPORT_ALIVE\n")
 							fmt.Fprintf(conn, "%d\n", completedTurns)
 							fmt.Fprintf(conn, "%d\n", calcNumAliveCells(world))
@@ -186,10 +186,10 @@ func main() {
 					if action == "SAVE\n" {
 						mutexSending.Lock()
 						mutexTurnsWorld.Lock()
-						for _, conn := range connections {
+						for _, conn := range controllers {
 							fmt.Fprintf(conn, "SENDING_WORLD\n")
 						}
-						for _, conn := range connections {
+						for _, conn := range controllers {
 							sendWorld(world, conn, completedTurns)
 						}
 						mutexTurnsWorld.Unlock()
@@ -202,17 +202,17 @@ func main() {
 						mutexSending.Lock()
 						mutexTurnsWorld.Lock()
 						if paused {
-							for _, conn := range connections {
+							for _, conn := range controllers {
 								fmt.Fprintf(conn, "RESUMING\n")
 							}
 							paused = false
 						} else {
-							for _, conn := range connections {
+							for _, conn := range controllers {
 								fmt.Fprintf(conn, "PAUSING\n")
 							}
 							paused = true
 						}
-						for _, conn := range connections {
+						for _, conn := range controllers {
 							fmt.Fprintf(conn, "%d\n", completedTurns)
 						}
 						mutexTurnsWorld.Unlock()
@@ -240,20 +240,20 @@ func main() {
 			mutexDone.Lock()
 			done = true
 			mutexSending.Lock()
-			for _, conn := range connections {
+			for _, conn := range controllers {
 				fmt.Fprintf(conn, "DONE\n")
 			}
 			mutexSending.Unlock()
 			mutexDone.Unlock()
 			// Send the world back to the controller
 			mutexSending.Lock()
-			for _, conn := range connections {
+			for _, conn := range controllers {
 				sendWorld(world, conn, completedTurns)
 			}
 			mutexSending.Unlock()
 			fmt.Printf("Computed %d turns of %dx%d\n", completedTurns, height, width)
 			mutexSending.Lock()
-			connections = []net.Conn{} // Clear the connections once processing the current board is finished
+			controllers = []net.Conn{} // Clear the controllers once processing the current board is finished
 			mutexSending.Unlock()
 		}
 	}

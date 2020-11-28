@@ -1,1 +1,1 @@
-package worker
+package main
