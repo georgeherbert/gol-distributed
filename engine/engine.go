@@ -130,10 +130,8 @@ func sendWorld(world [][]byte, conn net.Conn, completedTurns int) {
 func main() {
 	portPtr := flag.String("port", ":8030", "port to listen on")
 	ln, _ := net.Listen("tcp", *portPtr)
-
 	messages := make(chan string)
 	mutexSending := &sync.Mutex{} // Used whenever sending data to client to stop multiple things being sent at once
-
 	var connections []net.Conn
 	go func() {
 		for {
@@ -145,8 +143,6 @@ func main() {
 			mutexSending.Unlock()
 		}
 	}()
-
-	//TODO: Fix bug that means rejoining once finished causes problems
 	for {
 		if <-messages == "INITIALISE\n" { // This stops a new connection attempting to rejoin once all turns are complete breaking the engine
 			heightString, _ := <-messages
@@ -157,7 +153,6 @@ func main() {
 			turns := netStringToInt(turnsString)
 			world := initialiseWorld(height, width, messages)
 			fmt.Printf("Received %dx%d\n", height, width)
-
 			var turn int
 			var completedTurns int
 			done := false
@@ -201,7 +196,7 @@ func main() {
 						mutexSending.Unlock()
 						fmt.Println("Sent World")
 					} else if action == "QUIT\n" {
-						fmt.Println("QUIT")
+						fmt.Println("A connection has quit")
 					} else if action == "PAUSE\n" {
 						pause <- true
 						mutexSending.Lock()
@@ -241,7 +236,6 @@ func main() {
 				completedTurns = turn + 1
 				mutexTurnsWorld.Unlock()
 			}
-
 			// Once it has done all the iterations, send a message to the controller to let it know it is done
 			mutexDone.Lock()
 			done = true
@@ -251,7 +245,6 @@ func main() {
 			}
 			mutexSending.Unlock()
 			mutexDone.Unlock()
-
 			// Send the world back to the controller
 			mutexSending.Lock()
 			for _, conn := range connections {
@@ -259,7 +252,6 @@ func main() {
 			}
 			mutexSending.Unlock()
 			fmt.Printf("Computed %d turns of %dx%d\n", completedTurns, height, width)
-
 			mutexSending.Lock()
 			connections = []net.Conn{} // Clear the connections once processing the current board is finished
 			mutexSending.Unlock()
