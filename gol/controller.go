@@ -148,7 +148,7 @@ func controller(p Params, c distributorChannels) {
 	fileName := strconv.Itoa(p.ImageWidth) + "x" + strconv.Itoa(p.ImageHeight)
 
 	if p.Rejoin == false {
-		fmt.Fprintf(conn, "INITIALISE\n")
+		fmt.Fprintf(conn, "INITIALISE\n") // Send image height to server
 
 		sendFileName(fileName, c.ioCommand, c.ioFileName)
 
@@ -157,6 +157,8 @@ func controller(p Params, c distributorChannels) {
 		fmt.Fprintf(conn, "%d\n", p.Turns)       // Send number of turns to server
 
 		sendWorld(p.ImageHeight, p.ImageWidth, c.ioInput, conn) // Send the world to the server
+	} else {
+		fmt.Fprintf(conn, "REJOIN\n") // Send image height to server
 	}
 
 	quit := make(chan bool)
