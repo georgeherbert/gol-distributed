@@ -10,6 +10,15 @@ import (
 	"time"
 )
 
+func handleController(conn net.Conn, messages chan<- string) {
+	reader := bufio.NewReader(conn)
+	for {
+		msg, _ := reader.ReadString('\n')
+		fmt.Println("Message:", msg)
+		messages <- msg
+	}
+}
+
 // Converts a string receives over tcp to an integer
 func netStringToInt(netString string) int {
 	integer, _ := strconv.Atoi(netString[:len(netString) - 1])
@@ -17,14 +26,14 @@ func netStringToInt(netString string) int {
 }
 
 // Initialises the world, getting the values from the server
-func initialiseWorld(height int, width int, reader *bufio.Reader) [][]byte {
+func initialiseWorld(height int, width int, messages <-chan string) [][]byte {
 	world := make([][]byte, height)
 	for y := range world {
 		world[y] = make([]byte, width)
 	}
 	for y, row := range world {
 		for x := range row {
-			msg, _ := reader.ReadString('\n')
+			msg, _ := <-messages
 			cell := netStringToInt(msg)
 			world[y][x] = byte(cell)
 		}
@@ -120,28 +129,23 @@ func main() {
 	portPtr := flag.String("port", ":8030", "port to listen on")
 	ln, _ := net.Listen("tcp", *portPtr)
 
-	var conn net.Conn
-	mutexSending := &sync.Mutex{} // Used whenever sending data to client to stop multiple things being sent at once
-	go func(){
-		for {
-			newConn, _ := ln.Accept()
-			mutexSending.Lock()
-			conn = newConn
-			mutexSending.Unlock()
-		}
-	}()
+	messages := make(chan string)
 
-	//TODO: Find a way to stop this running until connection is established
+	conn, _ := ln.Accept()
+	go handleController(conn, messages)
+	connections := []net.Conn{conn}
+
 	for {
-		reader := bufio.NewReader(conn)
+		for <-messages != "INITIALISE\n" {
+		}
 
-		heightString, _ := reader.ReadString('\n')
-		widthString, _ := reader.ReadString('\n')
-		turnsString, _ := reader.ReadString('\n')
+		heightString, _ := <-messages
+		widthString, _ := <-messages
+		turnsString, _ := <-messages
 		height := netStringToInt(heightString)
 		width := netStringToInt(widthString)
 		turns := netStringToInt(turnsString)
-		world := initialiseWorld(height, width, reader)
+		world := initialiseWorld(height, width, messages)
 		fmt.Printf("Received %dx%d\n", height, width)
 
 		var turn int
@@ -149,6 +153,7 @@ func main() {
 		done := false
 		mutexDone := &sync.Mutex{}
 		mutexTurnsWorld := &sync.Mutex{}
+		mutexSending := &sync.Mutex{} // Used whenever sending data to client to stop multiple things being sent at once
 		ticker := time.NewTicker(2 * time.Second)
 		go func() {
 			for {
@@ -158,9 +163,11 @@ func main() {
 					mutexSending.Lock()
 					mutexTurnsWorld.Lock()
 					fmt.Printf("%d Turns Completed\n", completedTurns)
-					fmt.Fprintf(conn, "REPORT_ALIVE\n")
-					fmt.Fprintf(conn, "%d\n", completedTurns)
-					fmt.Fprintf(conn, "%d\n", calcNumAliveCells(world))
+					for _, conn := range connections {
+						fmt.Fprintf(conn, "REPORT_ALIVE\n")
+						fmt.Fprintf(conn, "%d\n", completedTurns)
+						fmt.Fprintf(conn, "%d\n", calcNumAliveCells(world))
+					}
 					mutexTurnsWorld.Unlock()
 					mutexSending.Unlock()
 				}
@@ -171,12 +178,16 @@ func main() {
 		go func() {
 			paused := false
 			for {
-				action, _ := reader.ReadString('\n')
+				action := <-messages
 				if action == "SAVE\n" {
 					mutexSending.Lock()
 					mutexTurnsWorld.Lock()
-					fmt.Fprintf(conn, "SENDING_WORLD\n")
-					sendWorld(world, conn, completedTurns)
+					for _, conn := range connections {
+						fmt.Fprintf(conn, "SENDING_WORLD\n")
+					}
+					for _, conn := range connections {
+						sendWorld(world, conn, completedTurns)
+					}
 					mutexTurnsWorld.Unlock()
 					mutexSending.Unlock()
 					fmt.Println("Sent World")
@@ -187,13 +198,19 @@ func main() {
 					mutexSending.Lock()
 					mutexTurnsWorld.Lock()
 					if paused {
-						fmt.Fprintf(conn, "RESUMING\n")
+						for _, conn := range connections {
+							fmt.Fprintf(conn, "RESUMING\n")
+						}
 						paused = false
 					} else {
-						fmt.Fprintf(conn, "PAUSING\n")
+						for _, conn := range connections {
+							fmt.Fprintf(conn, "PAUSING\n")
+						}
 						paused = true
 					}
-					fmt.Fprintf(conn, "%d\n", completedTurns)
+					for _, conn := range connections {
+						fmt.Fprintf(conn, "%d\n", completedTurns)
+					}
 					mutexTurnsWorld.Unlock()
 					mutexSending.Unlock()
 					fmt.Println("Paused/Resumed")
@@ -218,15 +235,17 @@ func main() {
 		mutexDone.Lock()
 		done = true
 		mutexSending.Lock()
-		fmt.Fprintf(conn, "DONE\n")
+		for _, conn := range connections {
+			fmt.Fprintf(conn, "DONE\n")
+		}
 		mutexSending.Unlock()
 		mutexDone.Unlock()
 
 		// Send the world back to the controller
 		mutexSending.Lock()
-		mutexTurnsWorld.Lock()
-		sendWorld(world, conn, completedTurns)
-		mutexTurnsWorld.Unlock()
+		for _, conn := range connections {
+			sendWorld(world, conn, completedTurns)
+		}
 		mutexSending.Unlock()
 		fmt.Printf("Computed %d turns of %dx%d\n", completedTurns, height, width)
 	}
