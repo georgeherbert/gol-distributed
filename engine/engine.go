@@ -21,7 +21,7 @@ func handleConnection(conn net.Conn, messages chan<- string) {
 	}
 }
 
-func handleNewConnections(lnController net.Listener, messagesController chan string, mutexControllers *sync.Mutex, controllers *[]net.Conn) {
+func handleNewConnections(lnController net.Listener, messagesController chan<- string, mutexControllers *sync.Mutex, controllers *[]net.Conn) {
 	for {
 		controller, _ := lnController.Accept()
 		fmt.Println("New controller")
@@ -41,6 +41,80 @@ func netStringToInt(netString string) int {
 func sendWorldToWorker(height int, width int, worker net.Conn, messages <-chan string) {
 	for i := 0; i < height*width; i++ {
 		fmt.Fprintf(worker, <-messages)
+	}
+}
+
+// Sends the number of alive cells every 2 seconds
+func ticker(mutexDone *sync.Mutex, done *bool, mutexControllers *sync.Mutex, mutexTurnsWorld *sync.Mutex,
+	completedTurns *int, controllers *[]net.Conn, numAliveCells *int) {
+	ticker := time.NewTicker(2 * time.Second)
+	go func() {
+		for {
+			<-ticker.C
+			mutexDone.Lock()
+			if !*done {
+				mutexControllers.Lock()
+				mutexTurnsWorld.Lock()
+				fmt.Printf("%d Turns Completed\n", *completedTurns)
+				for _, conn := range *controllers {
+					fmt.Fprintf(conn, "REPORT_ALIVE\n")
+					fmt.Fprintf(conn, "%d\n", *completedTurns)
+					fmt.Fprintf(conn, "%d\n", *numAliveCells)
+				}
+				mutexTurnsWorld.Unlock()
+				mutexControllers.Unlock()
+			} else {
+				break
+			}
+			mutexDone.Unlock()
+		}
+	}()
+}
+
+// Received key presses from the controller and processes them
+func handleKeyPresses(messagesController <-chan string, mutexControllers *sync.Mutex, mutexTurnsWorld *sync.Mutex,
+	controllers *[]net.Conn, world *[][]byte, completedTurns *int, pause chan<- bool) {
+	paused := false
+	for {
+		action := <-messagesController
+		if action == "SAVE\n" {
+			mutexControllers.Lock()
+			mutexTurnsWorld.Lock()
+			for _, conn := range *controllers {
+				fmt.Fprintf(conn, "SENDING_WORLD\n")
+				sendWorld(*world, conn, *completedTurns)
+			}
+			mutexTurnsWorld.Unlock()
+			mutexControllers.Unlock()
+			fmt.Println("Sent World")
+		} else if action == "QUIT\n" {
+			fmt.Println("A connection has quit")
+		} else if action == "PAUSE\n" {
+			pause <- true
+			mutexControllers.Lock()
+			mutexTurnsWorld.Lock()
+			if paused {
+				for _, conn := range *controllers {
+					fmt.Fprintf(conn, "RESUMING\n")
+				}
+				paused = false
+			} else {
+				for _, conn := range *controllers {
+					fmt.Fprintf(conn, "PAUSING\n")
+				}
+				paused = true
+			}
+			for _, conn := range *controllers {
+				fmt.Fprintf(conn, "%d\n", *completedTurns)
+			}
+			mutexTurnsWorld.Unlock()
+			mutexControllers.Unlock()
+			fmt.Println("Paused/Resumed")
+		} else if action == "RESUME\n" {
+			fmt.Println("RESUME")
+		} else if action == "DONE\n" {
+			break
+		}
 	}
 }
 
@@ -108,7 +182,6 @@ func main() {
 		if <-messagesController == "INITIALISE\n" { // This stops a new connection attempting to rejoin once all turns are complete breaking the engine
 			heightString, widthString, turnsString := <-messagesController, <-messagesController, <-messagesController
 			height, width, turns := netStringToInt(heightString), netStringToInt(widthString), netStringToInt(turnsString)
-
 			done := false
 			mutexDone := &sync.Mutex{}
 			var completedTurns int
@@ -116,79 +189,13 @@ func main() {
 			var world [][]byte // temporary while setting up worker
 			if turns > 0 {     // If there are more than 0 turns, process them
 				fmt.Println("Received details")
-
 				fmt.Fprintf(worker, heightString)
 				fmt.Fprintf(worker, widthString)
 				sendWorldToWorker(height, width, worker, messagesController)
-
-				ticker := time.NewTicker(2 * time.Second)
 				numAliveCells := 0
-				go func() {
-					for {
-						<-ticker.C
-						mutexDone.Lock()
-						if !done {
-							mutexControllers.Lock()
-							mutexTurnsWorld.Lock()
-							fmt.Printf("%d Turns Completed\n", completedTurns)
-							for _, conn := range *controllers {
-								fmt.Fprintf(conn, "REPORT_ALIVE\n")
-								fmt.Fprintf(conn, "%d\n", completedTurns)
-								fmt.Fprintf(conn, "%d\n", numAliveCells)
-							}
-							mutexTurnsWorld.Unlock()
-							mutexControllers.Unlock()
-						} else {
-							break
-						}
-						mutexDone.Unlock()
-					}
-				}()
+				go ticker(mutexDone, &done, mutexControllers, mutexTurnsWorld, &completedTurns, controllers, &numAliveCells)
 				pause := make(chan bool)
-				go func() {
-					paused := false
-					for {
-						action := <-messagesController
-						if action == "SAVE\n" {
-							mutexControllers.Lock()
-							mutexTurnsWorld.Lock()
-							for _, conn := range *controllers {
-								fmt.Fprintf(conn, "SENDING_WORLD\n")
-								sendWorld(world, conn, completedTurns)
-							}
-							mutexTurnsWorld.Unlock()
-							mutexControllers.Unlock()
-							fmt.Println("Sent World")
-						} else if action == "QUIT\n" {
-							fmt.Println("A connection has quit")
-						} else if action == "PAUSE\n" {
-							pause <- true
-							mutexControllers.Lock()
-							mutexTurnsWorld.Lock()
-							if paused {
-								for _, conn := range *controllers {
-									fmt.Fprintf(conn, "RESUMING\n")
-								}
-								paused = false
-							} else {
-								for _, conn := range *controllers {
-									fmt.Fprintf(conn, "PAUSING\n")
-								}
-								paused = true
-							}
-							for _, conn := range *controllers {
-								fmt.Fprintf(conn, "%d\n", completedTurns)
-							}
-							mutexTurnsWorld.Unlock()
-							mutexControllers.Unlock()
-							fmt.Println("Paused/Resumed")
-						} else if action == "RESUME\n" {
-							fmt.Println("RESUME")
-						} else if action == "DONE\n" {
-							break
-						}
-					}
-				}()
+				go handleKeyPresses(messagesController, mutexControllers, mutexTurnsWorld, controllers, &world, &completedTurns, pause)
 				for turn := 0; turn < turns; turn++ {
 					select {
 					case <-pause:
