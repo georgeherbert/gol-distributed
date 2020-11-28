@@ -13,8 +13,11 @@ import (
 func handleController(conn net.Conn, messages chan<- string) {
 	reader := bufio.NewReader(conn)
 	for {
-		msg, _ := reader.ReadString('\n')
-		fmt.Println("Message:", msg)
+		msg, err := reader.ReadString('\n')
+		//fmt.Println("M:", msg, err)
+		if err != nil { // EOF
+			break
+		}
 		messages <- msg
 	}
 }
@@ -131,13 +134,18 @@ func main() {
 
 	messages := make(chan string)
 
-	conn, _ := ln.Accept()
-	go handleController(conn, messages)
-	connections := []net.Conn{conn}
+	var connections []net.Conn
+	go func() {
+		for {
+			conn, _ := ln.Accept()
+			fmt.Println("New connection")
+			go handleController(conn, messages)
+			connections = append(connections, conn)
+		}
+	}()
 
 	for {
-		for <-messages != "INITIALISE\n" {
-		}
+		fmt.Println(<-messages)
 
 		heightString, _ := <-messages
 		widthString, _ := <-messages
