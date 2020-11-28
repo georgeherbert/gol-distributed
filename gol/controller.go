@@ -150,6 +150,7 @@ func controller(p Params, c distributorChannels) {
 
 		sendFileName(fileName, c.ioCommand, c.ioFileName)
 
+		fmt.Println(p.ImageHeight, p.ImageWidth, p.Turns)
 		fmt.Fprintf(conn, "%d\n", p.ImageHeight) // Send image height to server
 		fmt.Fprintf(conn, "%d\n", p.ImageWidth)  // Send image width to server
 		fmt.Fprintf(conn, "%d\n", p.Turns)       // Send number of turns to server
@@ -159,7 +160,7 @@ func controller(p Params, c distributorChannels) {
 
 	quit := make(chan bool)
 	go manageKeyPresses(c.keyPresses, quit, conn)
-	done := make(chan bool)                                                                                               // Used to stop execution until the turns are done executing otherwise receiveWorld will start trying to receive
+	done := make(chan bool) // Used to stop execution until the turns are done executing otherwise receiveWorld will start trying to receive
 	go handleEngine(c.events, reader, done, p.ImageHeight, p.ImageWidth, fileName, c.ioCommand, c.ioFileName, c.ioOutput) // Report the alive cells until the engine is done
 	select {
 	case <-done:
