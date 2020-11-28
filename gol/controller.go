@@ -150,7 +150,6 @@ func controller(p Params, c distributorChannels) {
 
 		sendFileName(fileName, c.ioCommand, c.ioFileName)
 
-		fmt.Println(p.ImageHeight, p.ImageWidth, p.Turns)
 		fmt.Fprintf(conn, "%d\n", p.ImageHeight) // Send image height to server
 		fmt.Fprintf(conn, "%d\n", p.ImageWidth)  // Send image width to server
 		fmt.Fprintf(conn, "%d\n", p.Turns)       // Send number of turns to server
