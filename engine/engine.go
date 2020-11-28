@@ -146,120 +146,123 @@ func main() {
 		}
 	}()
 
+	//TODO: Fix bug that means rejoining once finished causes problems
 	for {
-		heightString, _ := <-messages
-		widthString, _ := <-messages
-		turnsString, _ := <-messages
-		height := netStringToInt(heightString)
-		width := netStringToInt(widthString)
-		turns := netStringToInt(turnsString)
-		world := initialiseWorld(height, width, messages)
-		fmt.Printf("Received %dx%d\n", height, width)
+		if <-messages == "INITIALISE\n" { // This stops a new connection attempting to rejoin once all turns are complete breaking the engine
+			heightString, _ := <-messages
+			widthString, _ := <-messages
+			turnsString, _ := <-messages
+			height := netStringToInt(heightString)
+			width := netStringToInt(widthString)
+			turns := netStringToInt(turnsString)
+			world := initialiseWorld(height, width, messages)
+			fmt.Printf("Received %dx%d\n", height, width)
 
-		var turn int
-		var completedTurns int
-		done := false
-		mutexDone := &sync.Mutex{}
-		mutexTurnsWorld := &sync.Mutex{}
-		ticker := time.NewTicker(2 * time.Second)
-		go func() {
-			for {
-				<-ticker.C
-				mutexDone.Lock()
-				if !done {
-					mutexSending.Lock()
-					mutexTurnsWorld.Lock()
-					fmt.Printf("%d Turns Completed\n", completedTurns)
-					for _, conn := range connections {
-						fmt.Fprintf(conn, "REPORT_ALIVE\n")
-						fmt.Fprintf(conn, "%d\n", completedTurns)
-						fmt.Fprintf(conn, "%d\n", calcNumAliveCells(world))
-					}
-					mutexTurnsWorld.Unlock()
-					mutexSending.Unlock()
-				}
-				mutexDone.Unlock()
-			}
-		}()
-		pause := make(chan bool)
-		go func() {
-			paused := false
-			for {
-				action := <-messages
-				if action == "SAVE\n" {
-					mutexSending.Lock()
-					mutexTurnsWorld.Lock()
-					for _, conn := range connections {
-						fmt.Fprintf(conn, "SENDING_WORLD\n")
-					}
-					for _, conn := range connections {
-						sendWorld(world, conn, completedTurns)
-					}
-					mutexTurnsWorld.Unlock()
-					mutexSending.Unlock()
-					fmt.Println("Sent World")
-				} else if action == "QUIT\n" {
-					fmt.Println("QUIT")
-				} else if action == "PAUSE\n"  {
-					pause <- true
-					mutexSending.Lock()
-					mutexTurnsWorld.Lock()
-					if paused {
+			var turn int
+			var completedTurns int
+			done := false
+			mutexDone := &sync.Mutex{}
+			mutexTurnsWorld := &sync.Mutex{}
+			ticker := time.NewTicker(2 * time.Second)
+			go func() {
+				for {
+					<-ticker.C
+					mutexDone.Lock()
+					if !done {
+						mutexSending.Lock()
+						mutexTurnsWorld.Lock()
+						fmt.Printf("%d Turns Completed\n", completedTurns)
 						for _, conn := range connections {
-							fmt.Fprintf(conn, "RESUMING\n")
+							fmt.Fprintf(conn, "REPORT_ALIVE\n")
+							fmt.Fprintf(conn, "%d\n", completedTurns)
+							fmt.Fprintf(conn, "%d\n", calcNumAliveCells(world))
 						}
-						paused = false
-					} else {
-						for _, conn := range connections {
-							fmt.Fprintf(conn, "PAUSING\n")
-						}
-						paused = true
+						mutexTurnsWorld.Unlock()
+						mutexSending.Unlock()
 					}
-					for _, conn := range connections {
-						fmt.Fprintf(conn, "%d\n", completedTurns)
-					}
-					mutexTurnsWorld.Unlock()
-					mutexSending.Unlock()
-					fmt.Println("Paused/Resumed")
-				} else if action == "RESUME\n" {
-					fmt.Println("RESUME")
-				} else if action == "DONE\n" {
-					break
+					mutexDone.Unlock()
 				}
+			}()
+			pause := make(chan bool)
+			go func() {
+				paused := false
+				for {
+					action := <-messages
+					if action == "SAVE\n" {
+						mutexSending.Lock()
+						mutexTurnsWorld.Lock()
+						for _, conn := range connections {
+							fmt.Fprintf(conn, "SENDING_WORLD\n")
+						}
+						for _, conn := range connections {
+							sendWorld(world, conn, completedTurns)
+						}
+						mutexTurnsWorld.Unlock()
+						mutexSending.Unlock()
+						fmt.Println("Sent World")
+					} else if action == "QUIT\n" {
+						fmt.Println("QUIT")
+					} else if action == "PAUSE\n" {
+						pause <- true
+						mutexSending.Lock()
+						mutexTurnsWorld.Lock()
+						if paused {
+							for _, conn := range connections {
+								fmt.Fprintf(conn, "RESUMING\n")
+							}
+							paused = false
+						} else {
+							for _, conn := range connections {
+								fmt.Fprintf(conn, "PAUSING\n")
+							}
+							paused = true
+						}
+						for _, conn := range connections {
+							fmt.Fprintf(conn, "%d\n", completedTurns)
+						}
+						mutexTurnsWorld.Unlock()
+						mutexSending.Unlock()
+						fmt.Println("Paused/Resumed")
+					} else if action == "RESUME\n" {
+						fmt.Println("RESUME")
+					} else if action == "DONE\n" {
+						break
+					}
+				}
+			}()
+			for turn = 0; turn < turns; turn++ {
+				select {
+				case <-pause:
+					<-pause
+				default:
+				}
+				mutexTurnsWorld.Lock()
+				world = calcNextState(world)
+				completedTurns = turn + 1
+				mutexTurnsWorld.Unlock()
 			}
-		}()
-		for turn = 0; turn < turns; turn++ {
-			select {
-			case <-pause:
-				<-pause
-			default:
+
+			// Once it has done all the iterations, send a message to the controller to let it know it is done
+			mutexDone.Lock()
+			done = true
+			mutexSending.Lock()
+			for _, conn := range connections {
+				fmt.Fprintf(conn, "DONE\n")
 			}
-			mutexTurnsWorld.Lock()
-			world = calcNextState(world)
-			completedTurns = turn + 1
-			mutexTurnsWorld.Unlock()
-		}
+			mutexSending.Unlock()
+			mutexDone.Unlock()
 
-		// Once it has done all the iterations, send a message to the controller to let it know it is done
-		mutexDone.Lock()
-		done = true
-		mutexSending.Lock()
-		for _, conn := range connections {
-			fmt.Fprintf(conn, "DONE\n")
-		}
-		mutexSending.Unlock()
-		mutexDone.Unlock()
+			// Send the world back to the controller
+			mutexSending.Lock()
+			for _, conn := range connections {
+				sendWorld(world, conn, completedTurns)
+			}
+			mutexSending.Unlock()
+			fmt.Printf("Computed %d turns of %dx%d\n", completedTurns, height, width)
 
-		// Send the world back to the controller
-		mutexSending.Lock()
-		for _, conn := range connections {
-			sendWorld(world, conn, completedTurns)
+			mutexSending.Lock()
+			connections = []net.Conn{} // Clear the connections once processing the current board is finished
+			mutexSending.Unlock()
 		}
-		mutexSending.Unlock()
-		fmt.Printf("Computed %d turns of %dx%d\n", completedTurns, height, width)
-
-		mutexSending.Lock()
-		connections = []net.Conn{} // Clear the connections once processing the current board is finished
-		mutexSending.Unlock()
 	}
 }
