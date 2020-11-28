@@ -146,8 +146,6 @@ func controller(p Params, c distributorChannels) {
 	fileName := strconv.Itoa(p.ImageWidth) + "x" + strconv.Itoa(p.ImageHeight)
 
 	if p.Rejoin == false {
-		fmt.Fprintf(conn, "INITIALISE\n")
-
 		sendFileName(fileName, c.ioCommand, c.ioFileName)
 
 		fmt.Fprintf(conn, "%d\n", p.ImageHeight) // Send image height to server
@@ -165,6 +163,7 @@ func controller(p Params, c distributorChannels) {
 	case <-done:
 		// Receives the world back from the server once all rounds are complete
 		world, completedTurns := receiveWorld(p.ImageHeight, p.ImageWidth, reader)
+		fmt.Fprintf(conn, "DONE\n") // Sends this message back to the controller to let it know it has receives the message
 		// Once the final turn is complete
 		aliveCells := getAliveCells(world)
 		c.events <- FinalTurnComplete{

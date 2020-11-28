@@ -14,7 +14,6 @@ func handleController(conn net.Conn, messages chan<- string) {
 	reader := bufio.NewReader(conn)
 	for {
 		msg, err := reader.ReadString('\n')
-		//fmt.Println("M:", msg, err)
 		if err != nil { // EOF
 			break
 		}
@@ -133,6 +132,7 @@ func main() {
 	ln, _ := net.Listen("tcp", *portPtr)
 
 	messages := make(chan string)
+	mutexSending := &sync.Mutex{} // Used whenever sending data to client to stop multiple things being sent at once
 
 	var connections []net.Conn
 	go func() {
@@ -140,13 +140,13 @@ func main() {
 			conn, _ := ln.Accept()
 			fmt.Println("New connection")
 			go handleController(conn, messages)
+			mutexSending.Lock()
 			connections = append(connections, conn)
+			mutexSending.Unlock()
 		}
 	}()
 
 	for {
-		fmt.Println(<-messages)
-
 		heightString, _ := <-messages
 		widthString, _ := <-messages
 		turnsString, _ := <-messages
@@ -161,7 +161,6 @@ func main() {
 		done := false
 		mutexDone := &sync.Mutex{}
 		mutexTurnsWorld := &sync.Mutex{}
-		mutexSending := &sync.Mutex{} // Used whenever sending data to client to stop multiple things being sent at once
 		ticker := time.NewTicker(2 * time.Second)
 		go func() {
 			for {
@@ -224,6 +223,8 @@ func main() {
 					fmt.Println("Paused/Resumed")
 				} else if action == "RESUME\n" {
 					fmt.Println("RESUME")
+				} else if action == "DONE\n" {
+					break
 				}
 			}
 		}()
@@ -256,5 +257,9 @@ func main() {
 		}
 		mutexSending.Unlock()
 		fmt.Printf("Computed %d turns of %dx%d\n", completedTurns, height, width)
+
+		mutexSending.Lock()
+		connections = []net.Conn{} // Clear the connections once processing the current board is finished
+		mutexSending.Unlock()
 	}
 }
