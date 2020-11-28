@@ -156,8 +156,6 @@ func main() {
 							mutexTurnsWorld.Lock()
 							for _, conn := range controllers {
 								fmt.Fprintf(conn, "SENDING_WORLD\n")
-							}
-							for _, conn := range controllers {
 								sendWorld(world, conn, completedTurns)
 							}
 							mutexTurnsWorld.Unlock()
