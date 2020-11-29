@@ -164,6 +164,9 @@ func main() {
 	portWorkerPtr := flag.String("port_worker", ":8040", "port to listen on")
 	flag.Parse()
 
+	//TODO: Maybe put this stuff in a function seeing as the two blocks are identical
+
+	// Controllers stuff
 	lnController, _ := net.Listen("tcp", *portControllerPtr)
 	messagesController := make(chan string)
 	mutexControllers := &sync.Mutex{} // Used whenever sending data to client to stop multiple things being sent at once
@@ -182,30 +185,37 @@ func main() {
 			heightString, widthString, turnsString, threadsString := <-messagesController, <-messagesController, <-messagesController, <-messagesController
 			height, width, turns, threads := netStringToInt(heightString), netStringToInt(widthString), netStringToInt(turnsString), netStringToInt(threadsString)
 			done := false
-			mutexDone := &sync.Mutex{}
 			completedTurns := 0
+			mutexDone := &sync.Mutex{}
 			mutexTurnsWorld := &sync.Mutex{}
 			fmt.Println(threads)
+
 			var world [][]byte // temporary while setting up worker
+
 			if turns > 0 {     // If there are more than 0 turns, process them
 				fmt.Println("Received details")
+
 				mutexWorkers.Lock()
 				fmt.Fprintf((*workers)[0], heightString)
 				fmt.Fprintf((*workers)[0], widthString)
 				fmt.Fprintf((*workers)[0], threadsString)
 				sendWorldToWorker(height, width, (*workers)[0], messagesController)
 				mutexWorkers.Unlock()
+
 				numAliveCells := 0
 				go ticker(mutexDone, &done, mutexControllers, mutexTurnsWorld, &completedTurns, controllers, &numAliveCells)
+
 				pause := make(chan bool)
 				send := make(chan bool)
 				go handleKeyPresses(messagesController, mutexControllers, mutexTurnsWorld, controllers, &world, &completedTurns, pause, send)
+
 				for turn := 0; turn < turns; turn++ {
 					select {
 					case <-pause:
 						<-pause
 					default:
 					}
+
 					mutexTurnsWorld.Lock()
 					numAliveCellsString := <-messagesWorker
 					numAliveCells = netStringToInt(numAliveCellsString)
@@ -226,14 +236,17 @@ func main() {
 					mutexWorkers.Unlock()
 					mutexTurnsWorld.Unlock()
 				}
+
 				mutexTurnsWorld.Lock()
 				world = receiveWorldFromWorker(height, width, messagesWorker)
 				mutexTurnsWorld.Unlock()
+
 			} else { // If turns == 0, just initialise the world variable as the values from the controller
 				mutexTurnsWorld.Lock()
 				world = initialiseWorld(height, width, messagesController)
 				mutexTurnsWorld.Unlock()
 			}
+
 			// Once it has done all the iterations, send a message to the controller to let it know it is done
 			mutexDone.Lock()
 			done = true
@@ -241,13 +254,16 @@ func main() {
 			sendToAllControllers(controllers, "DONE\n")
 			mutexControllers.Unlock()
 			mutexDone.Unlock()
+
 			// Send the world back to the controller
 			mutexControllers.Lock()
 			for _, conn := range *controllers {
 				sendWorld(world, conn, completedTurns)
 			}
 			mutexControllers.Unlock()
+
 			fmt.Printf("Computed %d turns of %dx%d\n", completedTurns, height, width)
+
 			mutexControllers.Lock()
 			*controllers = (*controllers)[:0] // Clear the controllers once processing the current board is finished
 			mutexControllers.Unlock()
