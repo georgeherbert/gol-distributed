@@ -42,18 +42,19 @@ func initialiseWorld(height int, width int, messages <-chan string) [][]byte {
 
 // Returns the neighbours of a cell at given coordinates
 func getNeighbours(world [][]byte, row int, column int) []byte {
-	rowAbove, rowBelow := row-1, row+1
+	rowAbove, rowBelow := row - 1, row + 1
 	if row == 0 {
 		rowAbove = len(world[0]) - 1
-	} else if row == len(world[0])-1 {
+	} else if row == len(world[0]) - 1 {
 		rowBelow = 0
 	}
-	columnLeft, columnRight := column-1, column+1
+	columnLeft, columnRight := column - 1, column + 1
 	if column == 0 {
 		columnLeft = len(world[0]) - 1
-	} else if column == len(world[0])-1 {
+	} else if column == len(world[0]) - 1 {
 		columnRight = 0
 	}
+	//fmt.Println(row, column)
 	neighbours := []byte{world[rowAbove][columnLeft], world[rowAbove][column], world[rowAbove][columnRight],
 		world[row][columnLeft], world[row][columnRight], world[rowBelow][columnLeft], world[rowBelow][column],
 		world[rowBelow][columnRight]}
@@ -89,10 +90,10 @@ func calcValue(item byte, liveNeighbours int) byte {
 // Returns the next state of a world given the current state
 func calcNextState(world [][]byte) [][]byte {
 	var nextWorld [][]byte
-	for y, row := range world {
+	for y, row := range world[1:len(world) - 1] {
 		nextWorld = append(nextWorld, []byte{})
 		for x, element := range row {
-			neighbours := getNeighbours(world, y, x)
+			neighbours := getNeighbours(world, y+1, x)
 			liveNeighbours := calcLiveNeighbours(neighbours)
 			value := calcValue(element, liveNeighbours)
 			nextWorld[y] = append(nextWorld[y], value)
@@ -116,7 +117,7 @@ func calcNumAliveCells(world [][]byte) int {
 
 func sendWorldToEngine(engine net.Conn, world [][]byte) {
 	fmt.Println("Sending world to engine")
-	for _, row := range world {
+	for _, row := range world[1:len(world) - 1] {
 		for _, cell := range row {
 			cellAsString := strconv.Itoa(int(cell)) + "\n"
 			fmt.Fprintf(engine, cellAsString)
@@ -131,11 +132,16 @@ func main() {
 	for {
 		heightString, widthString, threadsString := <-messages, <-messages, <-messages
 		height, width, threads := netStringToInt(heightString), netStringToInt(widthString), netStringToInt(threadsString)
-		fmt.Println(threads)
-		world := initialiseWorld(height, width, messages)
+		heightToReceive := height + 2
+		fmt.Sprintf("", threads)
+		world := initialiseWorld(heightToReceive, width, messages)
+		fmt.Println("Received world")
 		for {
-			world = calcNextState(world)
-			aliveCells := calcNumAliveCells(world)
+			nextWorld := calcNextState(world)
+			world = [][]byte{nextWorld[len(nextWorld) - 1]}
+			world = append(world, nextWorld...)
+			world = append(world, nextWorld[0])
+			aliveCells := calcNumAliveCells(world[1:len(world) - 1])
 			aliveCellsString := strconv.Itoa(aliveCells) + "\n"
 			fmt.Fprintf(engine, aliveCellsString)
 			status := <-messages
