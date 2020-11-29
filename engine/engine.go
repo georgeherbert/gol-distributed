@@ -21,13 +21,26 @@ func handleConnection(conn net.Conn, messages chan<- string) {
 	}
 }
 
-func handleNewConnections(ln net.Listener, messages chan<- string, mutex *sync.Mutex, connections *[]net.Conn) {
+func handleNewControllers(ln net.Listener, messages chan<- string, mutex *sync.Mutex, connections *[]net.Conn) {
 	for {
-		controller, _ := ln.Accept()
+		connection, _ := ln.Accept()
 		fmt.Println("New connection")
-		go handleConnection(controller, messages)
+		go handleConnection(connection, messages)
 		mutex.Lock()
-		*connections = append(*connections, controller)
+		*connections = append(*connections, connection)
+		mutex.Unlock()
+	}
+}
+
+func handleNewWorkers(ln net.Listener, messagesSlice *[]chan string, mutex *sync.Mutex, connections *[]net.Conn) {
+	for {
+		connection, _ := ln.Accept()
+		fmt.Println("New connection")
+		messages := make(chan string)
+		*messagesSlice = append(*messagesSlice, messages)
+		go handleConnection(connection, messages)
+		mutex.Lock()
+		*connections = append(*connections, connection)
 		mutex.Unlock()
 	}
 }
@@ -171,14 +184,14 @@ func main() {
 	messagesController := make(chan string)
 	mutexControllers := &sync.Mutex{} // Used whenever sending data to client to stop multiple things being sent at once
 	controllers := new([]net.Conn)
-	go handleNewConnections(lnController, messagesController, mutexControllers, controllers)
+	go handleNewControllers(lnController, messagesController, mutexControllers, controllers)
 
 	// Workers stuff
 	lnWorker, _ := net.Listen("tcp", *portWorkerPtr)
-	messagesWorker := make(chan string)
+	messagesWorker := new([]chan string)
 	mutexWorkers := &sync.Mutex{}
 	workers := new([]net.Conn)
-	go handleNewConnections(lnWorker, messagesWorker, mutexWorkers, workers)
+	go handleNewWorkers(lnWorker, messagesWorker, mutexWorkers, workers)
 
 	for {
 		if <-messagesController == "INITIALISE\n" { // This stops a new connection attempting to rejoin once all turns are complete breaking the engine
@@ -217,14 +230,14 @@ func main() {
 					}
 
 					mutexTurnsWorld.Lock()
-					numAliveCellsString := <-messagesWorker
+					numAliveCellsString := <-(*messagesWorker)[0]
 					numAliveCells = netStringToInt(numAliveCellsString)
 					completedTurns = turn + 1
 					mutexWorkers.Lock()
 					select {
 					case <-send:
 						fmt.Fprintf((*workers)[0], "SEND_WORLD\n")
-						world = receiveWorldFromWorker(height, width, messagesWorker)
+						world = receiveWorldFromWorker(height, width, (*messagesWorker)[0])
 						send <- true
 					default:
 						if completedTurns != turns {
@@ -238,7 +251,7 @@ func main() {
 				}
 
 				mutexTurnsWorld.Lock()
-				world = receiveWorldFromWorker(height, width, messagesWorker)
+				world = receiveWorldFromWorker(height, width, (*messagesWorker)[0])
 				mutexTurnsWorld.Unlock()
 
 			} else { // If turns == 0, just initialise the world variable as the values from the controller
