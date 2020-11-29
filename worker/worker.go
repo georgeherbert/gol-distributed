@@ -32,7 +32,7 @@ func initialiseWorld(height int, width int, messages <-chan string) [][]byte {
 	}
 	for y, row := range world {
 		for x := range row {
-			msg, _ := <-messages
+			msg := <-messages
 			cell := netStringToInt(msg)
 			world[y][x] = byte(cell)
 		}
@@ -102,6 +102,22 @@ func calcNextState(world [][]byte) [][]byte {
 	return nextWorld
 }
 
+func sendRowToEngine(row []byte, engine net.Conn) {
+	writer := bufio.NewWriter(engine)
+	for _, element := range row {
+		writer.WriteString(fmt.Sprintf("%d\n", int(element)))
+	}
+	writer.Flush()
+}
+
+func getRowFromEngine(width int, messages <-chan string) []byte {
+	var row []byte
+	for i := 0; i < width; i++ {
+		row = append(row, byte(netStringToInt(<-messages)))
+	}
+	return row
+}
+
 // Returns the number of alive cells in a world
 func calcNumAliveCells(world [][]byte) int {
 	total := 0
@@ -140,6 +156,15 @@ func main() {
 		for {
 			nextWorld := calcNextState(world)
 			world = [][]byte{nextWorld[len(nextWorld) - 1]}
+
+			// Send the top row and bottom row to the controller
+			sendRowToEngine(world[0], engine)
+			sendRowToEngine(world[len(world) - 1], engine)
+
+			// Receive a new top row and bottom row from the controller
+			world[0] = getRowFromEngine(width, messages)
+			world[len(world) - 1] = getRowFromEngine(width, messages)
+
 			world = append(world, nextWorld...)
 			world = append(world, nextWorld[0])
 			aliveCells := calcNumAliveCells(world[1:len(world) - 1])
