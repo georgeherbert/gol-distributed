@@ -51,10 +51,51 @@ func netStringToInt(netString string) int {
 	return integer
 }
 
-func sendWorldToWorker(height int, width int, worker net.Conn, messages <-chan string) {
-	for i := 0; i < height*width; i++ {
-		fmt.Fprintf(worker, <-messages)
+// Initialises the world, getting the values from the server (only used if there are 0 turns)
+func initialiseWorld(height int, width int, messages <-chan string) [][]byte {
+	world := make([][]byte, height)
+	for y := range world {
+		world[y] = make([]byte, width)
 	}
+	for y, row := range world {
+		for x := range row {
+			msg, _ := <-messages
+			cell := netStringToInt(msg)
+			world[y][x] = byte(cell)
+		}
+	}
+	return world
+}
+
+// Returns part of a world given the number of threads, the part number, the startY, and the endY
+func getPart(world [][]byte, threads int, partNum int, startY int, endY int) [][]byte {
+	var worldPart [][]byte
+	if threads == 1 {
+		worldPart = append(worldPart, world[len(world) - 1])
+		worldPart = append(worldPart, world...)
+		worldPart = append(worldPart, world[0])
+	} else {
+		if partNum == 0 {
+			worldPart = append(worldPart, world[len(world)-1])
+			worldPart = append(worldPart, world[:endY + 1]...)
+		} else if partNum == threads - 1 {
+			worldPart = append(worldPart, world[startY - 1:]...)
+			worldPart = append(worldPart, world[0])
+		} else {
+			worldPart = append(worldPart, world[startY - 1:endY+1]...)
+		}
+	}
+	return worldPart
+}
+
+func sendPartToWorker(part [][]byte, worker net.Conn) {
+	writer := bufio.NewWriter(worker)
+	for _, row := range part {
+		for _, cell := range row {
+			writer.WriteString(fmt.Sprintf( "%d\n", cell))
+		}
+	}
+	writer.Flush()
 }
 
 func sendToAllControllers(controllers *[]net.Conn, value string) {
@@ -146,30 +187,16 @@ func receiveWorldFromWorker(height int, width int, messages <-chan string) [][]b
 	return world
 }
 
-// Initialises the world, getting the values from the server (only used if there are 0 turns)
-func initialiseWorld(height int, width int, messages <-chan string) [][]byte {
-	world := make([][]byte, height)
-	for y := range world {
-		world[y] = make([]byte, width)
-	}
-	for y, row := range world {
-		for x := range row {
-			msg, _ := <-messages
-			cell := netStringToInt(msg)
-			world[y][x] = byte(cell)
-		}
-	}
-	return world
-}
-
 // Returns the world with its final values filled
 func sendWorld(world [][]byte, conn net.Conn, completedTurns int) {
 	fmt.Fprintf(conn, "%d\n", completedTurns)
+	writer := bufio.NewWriter(conn)
 	for _, row := range world {
 		for _, element := range row {
-			fmt.Fprintf(conn, "%d\n", element)
+			writer.WriteString(fmt.Sprintf( "%d\n", element))
 		}
 	}
+	writer.Flush()
 }
 
 func main() {
@@ -197,13 +224,13 @@ func main() {
 		if <-messagesController == "INITIALISE\n" { // This stops a new connection attempting to rejoin once all turns are complete breaking the engine
 			heightString, widthString, turnsString, threadsString := <-messagesController, <-messagesController, <-messagesController, <-messagesController
 			height, width, turns, threads := netStringToInt(heightString), netStringToInt(widthString), netStringToInt(turnsString), netStringToInt(threadsString)
+
 			done := false
 			completedTurns := 0
 			mutexDone := &sync.Mutex{}
 			mutexTurnsWorld := &sync.Mutex{}
-			fmt.Println(threads)
 
-			var world [][]byte // temporary while setting up worker
+			world := initialiseWorld(height, width, messagesController)
 
 			if turns > 0 {     // If there are more than 0 turns, process them
 				fmt.Println("Received details")
@@ -212,7 +239,13 @@ func main() {
 				fmt.Fprintf((*workers)[0], heightString)
 				fmt.Fprintf((*workers)[0], widthString)
 				fmt.Fprintf((*workers)[0], threadsString)
-				sendWorldToWorker(height, width, (*workers)[0], messagesController)
+				sectionHeight := height / threads
+				for i := 0; i < 1; i++ { // TODO: Number of threads is currently hardcoded to 1
+					startY := i * sectionHeight
+					endY := startY + sectionHeight
+					part := getPart(world, 1, i, startY, endY) // TODO: Number of threads is currently hardcoded to 1
+					sendPartToWorker(part, (*workers)[i])
+				}
 				mutexWorkers.Unlock()
 
 				numAliveCells := 0
@@ -228,7 +261,6 @@ func main() {
 						<-pause
 					default:
 					}
-
 					mutexTurnsWorld.Lock()
 					numAliveCellsString := <-(*messagesWorker)[0]
 					numAliveCells = netStringToInt(numAliveCellsString)
@@ -252,11 +284,6 @@ func main() {
 
 				mutexTurnsWorld.Lock()
 				world = receiveWorldFromWorker(height, width, (*messagesWorker)[0])
-				mutexTurnsWorld.Unlock()
-
-			} else { // If turns == 0, just initialise the world variable as the values from the controller
-				mutexTurnsWorld.Lock()
-				world = initialiseWorld(height, width, messagesController)
 				mutexTurnsWorld.Unlock()
 			}
 

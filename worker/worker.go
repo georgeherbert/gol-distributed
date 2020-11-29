@@ -117,12 +117,13 @@ func calcNumAliveCells(world [][]byte) int {
 
 func sendWorldToEngine(engine net.Conn, world [][]byte) {
 	fmt.Println("Sending world to engine")
+	writer := bufio.NewWriter(engine)
 	for _, row := range world[1:len(world) - 1] {
 		for _, cell := range row {
-			cellAsString := strconv.Itoa(int(cell)) + "\n"
-			fmt.Fprintf(engine, cellAsString)
+			writer.WriteString(fmt.Sprintf("%d\n", int(cell)))
 		}
 	}
+	writer.Flush()
 }
 
 func main() {
