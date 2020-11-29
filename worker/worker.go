@@ -93,7 +93,7 @@ func calcNextState(world [][]byte) [][]byte {
 	for y, row := range world[1:len(world) - 1] {
 		nextWorld = append(nextWorld, []byte{})
 		for x, element := range row {
-			neighbours := getNeighbours(world, y+1, x)
+			neighbours := getNeighbours(world, y + 1, x)
 			liveNeighbours := calcLiveNeighbours(neighbours)
 			value := calcValue(element, liveNeighbours)
 			nextWorld[y] = append(nextWorld[y], value)
