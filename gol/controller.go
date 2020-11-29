@@ -154,6 +154,7 @@ func controller(p Params, c distributorChannels) {
 		fmt.Fprintf(conn, "%d\n", p.ImageHeight) // Send image height to server
 		fmt.Fprintf(conn, "%d\n", p.ImageWidth)  // Send image width to server
 		fmt.Fprintf(conn, "%d\n", p.Turns)       // Send number of turns to server
+		fmt.Fprintf(conn, "%d\n", p.Threads)     // Send number of threads to server
 
 		sendWorld(p.ImageHeight, p.ImageWidth, c.ioInput, conn) // Send the world to the server
 	}

@@ -21,14 +21,14 @@ func handleConnection(conn net.Conn, messages chan<- string) {
 	}
 }
 
-func handleNewConnections(lnController net.Listener, messagesController chan<- string, mutexControllers *sync.Mutex, controllers *[]net.Conn) {
+func handleNewConnections(ln net.Listener, messages chan<- string, mutex *sync.Mutex, connections *[]net.Conn) {
 	for {
-		controller, _ := lnController.Accept()
-		fmt.Println("New controller")
-		go handleConnection(controller, messagesController)
-		mutexControllers.Lock()
-		*controllers = append(*controllers, controller)
-		mutexControllers.Unlock()
+		controller, _ := ln.Accept()
+		fmt.Println("New connection")
+		go handleConnection(controller, messages)
+		mutex.Lock()
+		*connections = append(*connections, controller)
+		mutex.Unlock()
 	}
 }
 
@@ -163,6 +163,7 @@ func main() {
 	portControllerPtr := flag.String("port_controller", ":8030", "port to listen on for controllers")
 	portWorkerPtr := flag.String("port_worker", ":8040", "port to listen on")
 	flag.Parse()
+
 	lnController, _ := net.Listen("tcp", *portControllerPtr)
 	messagesController := make(chan string)
 	mutexControllers := &sync.Mutex{} // Used whenever sending data to client to stop multiple things being sent at once
@@ -171,27 +172,29 @@ func main() {
 
 	// Workers stuff
 	lnWorker, _ := net.Listen("tcp", *portWorkerPtr)
-	var workers []net.Conn
-	worker, _ := lnWorker.Accept()
-	fmt.Println("New worker")
-	workers = append(workers, worker)
 	messagesWorker := make(chan string)
-	go handleConnection(worker, messagesWorker)
+	mutexWorkers := &sync.Mutex{}
+	workers := new([]net.Conn)
+	go handleNewConnections(lnWorker, messagesWorker, mutexWorkers, workers)
 
 	for {
 		if <-messagesController == "INITIALISE\n" { // This stops a new connection attempting to rejoin once all turns are complete breaking the engine
-			heightString, widthString, turnsString := <-messagesController, <-messagesController, <-messagesController
-			height, width, turns := netStringToInt(heightString), netStringToInt(widthString), netStringToInt(turnsString)
+			heightString, widthString, turnsString, threadsString := <-messagesController, <-messagesController, <-messagesController, <-messagesController
+			height, width, turns, threads := netStringToInt(heightString), netStringToInt(widthString), netStringToInt(turnsString), netStringToInt(threadsString)
 			done := false
 			mutexDone := &sync.Mutex{}
 			completedTurns := 0
 			mutexTurnsWorld := &sync.Mutex{}
+			fmt.Println(threads)
 			var world [][]byte // temporary while setting up worker
 			if turns > 0 {     // If there are more than 0 turns, process them
 				fmt.Println("Received details")
-				fmt.Fprintf(worker, heightString)
-				fmt.Fprintf(worker, widthString)
-				sendWorldToWorker(height, width, worker, messagesController)
+				mutexWorkers.Lock()
+				fmt.Fprintf((*workers)[0], heightString)
+				fmt.Fprintf((*workers)[0], widthString)
+				fmt.Fprintf((*workers)[0], threadsString)
+				sendWorldToWorker(height, width, (*workers)[0], messagesController)
+				mutexWorkers.Unlock()
 				numAliveCells := 0
 				go ticker(mutexDone, &done, mutexControllers, mutexTurnsWorld, &completedTurns, controllers, &numAliveCells)
 				pause := make(chan bool)
@@ -207,18 +210,20 @@ func main() {
 					numAliveCellsString := <-messagesWorker
 					numAliveCells = netStringToInt(numAliveCellsString)
 					completedTurns = turn + 1
+					mutexWorkers.Lock()
 					select {
 					case <-send:
-						fmt.Fprintf(worker, "SEND_WORLD\n")
+						fmt.Fprintf((*workers)[0], "SEND_WORLD\n")
 						world = receiveWorldFromWorker(height, width, messagesWorker)
 						send <- true
 					default:
 						if completedTurns != turns {
-							fmt.Fprintf(worker, "CONTINUE\n")
+							fmt.Fprintf((*workers)[0], "CONTINUE\n")
 						} else {
-							fmt.Fprintf(worker, "DONE\n")
+							fmt.Fprintf((*workers)[0], "DONE\n")
 						}
 					}
+					mutexWorkers.Unlock()
 					mutexTurnsWorld.Unlock()
 				}
 				mutexTurnsWorld.Lock()

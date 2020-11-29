@@ -129,10 +129,9 @@ func main() {
 	messages := make(chan string)
 	go handleEngine(engine, messages)
 	for {
-		heightString := <-messages
-		widthString := <-messages
-		height := netStringToInt(heightString)
-		width := netStringToInt(widthString)
+		heightString, widthString, threadsString := <-messages, <-messages, <-messages
+		height, width, threads := netStringToInt(heightString), netStringToInt(widthString), netStringToInt(threadsString)
+		fmt.Println(threads)
 		world := initialiseWorld(height, width, messages)
 		for {
 			world = calcNextState(world)
