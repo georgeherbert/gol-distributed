@@ -245,7 +245,9 @@ func main() {
 			heightString, widthString, turnsString, threadsString := <-messagesController, <-messagesController, <-messagesController, <-messagesController
 			height, width, turns, threads := netStringToInt(heightString), netStringToInt(widthString), netStringToInt(turnsString), netStringToInt(threadsString)
 
+			mutexWorkers.Lock()
 			workersUsed := (*workers)[:threads]
+			mutexWorkers.Unlock()
 
 			done := false
 			completedTurns := 0
@@ -283,7 +285,7 @@ func main() {
 					default:
 					}
 					mutexTurnsWorld.Lock()
-					numAliveCells := 0
+					numAliveCells = 0
 					for _, channel := range (*messagesWorker)[:threads] {
 						numAliveCellsPartString := <-channel
 						numAliveCellsPart := netStringToInt(numAliveCellsPartString)
