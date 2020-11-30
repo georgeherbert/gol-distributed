@@ -254,7 +254,6 @@ func main() {
 				mutexWorkers.Lock()
 				fmt.Fprintf((*workers)[0], heightString)
 				fmt.Fprintf((*workers)[0], widthString)
-				fmt.Fprintf((*workers)[0], threadsString)
 				sectionHeight := height / threads
 				for i := 0; i < threads; i++ {
 					startY := i * sectionHeight
@@ -278,13 +277,13 @@ func main() {
 					default:
 					}
 					mutexTurnsWorld.Lock()
-					numAliveCellsString := <-(*messagesWorker)[0]
+					numAliveCellsString := <-(*messagesWorker)[0] // TODO: Number of alive cells should be received from all workers
 					numAliveCells = netStringToInt(numAliveCellsString)
 					completedTurns = turn + 1
 
 					// Receive the top and bottom rows from each worker
 					rowsFromWorkers := make([][][]byte, threads)
-					for i, workerChan := range *messagesWorker {
+					for i, workerChan := range (*messagesWorker)[:threads] {
 						topRow := receiveRowFromWorker(width, workerChan)
 						rowsFromWorkers[i] = append(rowsFromWorkers[i], topRow)
 						bottomRow := receiveRowFromWorker(width, workerChan)
