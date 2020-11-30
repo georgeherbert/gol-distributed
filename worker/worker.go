@@ -110,7 +110,7 @@ func sendRowToEngine(row []byte, engine net.Conn) {
 	writer.Flush()
 }
 
-func getRowFromEngine(width int, messages <-chan string) []byte {
+func receiveRowFromEngine(width int, messages <-chan string) []byte {
 	var row []byte
 	for i := 0; i < width; i++ {
 		row = append(row, byte(netStringToInt(<-messages)))
@@ -155,21 +155,27 @@ func main() {
 		fmt.Println("Received world")
 		for {
 			nextWorld := calcNextState(world)
-			world = [][]byte{nextWorld[len(nextWorld) - 1]}
 
-			// Send the top row and bottom row to the controller
-			sendRowToEngine(world[0], engine)
-			sendRowToEngine(world[len(world) - 1], engine)
-
-			// Receive a new top row and bottom row from the controller
-			world[0] = getRowFromEngine(width, messages)
-			world[len(world) - 1] = getRowFromEngine(width, messages)
-
-			world = append(world, nextWorld...)
-			world = append(world, nextWorld[0])
-			aliveCells := calcNumAliveCells(world[1:len(world) - 1])
+			// Report the number of alive cells to the engine
+			aliveCells := calcNumAliveCells(nextWorld)
 			aliveCellsString := strconv.Itoa(aliveCells) + "\n"
 			fmt.Fprintf(engine, aliveCellsString)
+
+			// Send the top row and bottom row to the controller
+			sendRowToEngine(nextWorld[0], engine)
+			sendRowToEngine(nextWorld[len(nextWorld) - 1], engine)
+
+			// Receive a new top row and bottom row from the controller
+			//world[0] = receiveRowFromEngine(width, messages)
+			//world[len(world) - 1] = receiveRowFromEngine(width, messages)
+			topRow := receiveRowFromEngine(width, messages)
+			bottomRow := receiveRowFromEngine(width, messages)
+
+			// Add the new top and bottom rows to the next world
+			world = [][]byte{bottomRow}
+			world = append(world, nextWorld...)
+			world = append(world, topRow)
+
 			status := <-messages
 			if status == "DONE\n" {
 				break

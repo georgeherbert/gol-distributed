@@ -172,6 +172,22 @@ func handleKeyPresses(messagesController <-chan string, mutexControllers *sync.M
 	}
 }
 
+func sendRowToWorker(row []byte, worker net.Conn) {
+	writer := bufio.NewWriter(worker)
+	for _, element := range row {
+		writer.WriteString(fmt.Sprintf("%d\n", int(element)))
+	}
+	writer.Flush()
+}
+
+func receiveRowFromWorker(width int, messages <-chan string) []byte {
+	var row []byte
+	for i := 0; i < width; i++ {
+		row = append(row, byte(netStringToInt(<-messages)))
+	}
+	return row
+}
+
 func receiveWorldFromWorker(height int, width int, messages <-chan string) [][]byte {
 	world := make([][]byte, height)
 	for y := range world {
@@ -240,10 +256,10 @@ func main() {
 				fmt.Fprintf((*workers)[0], widthString)
 				fmt.Fprintf((*workers)[0], threadsString)
 				sectionHeight := height / threads
-				for i := 0; i < 1; i++ { // TODO: Number of threads is currently hardcoded to 1
+				for i := 0; i < threads; i++ {
 					startY := i * sectionHeight
 					endY := startY + sectionHeight
-					part := getPart(world, 1, i, startY, endY) // TODO: Number of threads is currently hardcoded to 1
+					part := getPart(world, threads, i, startY, endY)
 					sendPartToWorker(part, (*workers)[i])
 				}
 				mutexWorkers.Unlock()
@@ -265,6 +281,29 @@ func main() {
 					numAliveCellsString := <-(*messagesWorker)[0]
 					numAliveCells = netStringToInt(numAliveCellsString)
 					completedTurns = turn + 1
+
+					// Receive the top and bottom rows from each worker
+					rowsFromWorkers := make([][][]byte, threads)
+					for i, workerChan := range *messagesWorker {
+						topRow := receiveRowFromWorker(width, workerChan)
+						rowsFromWorkers[i] = append(rowsFromWorkers[i], topRow)
+						bottomRow := receiveRowFromWorker(width, workerChan)
+						rowsFromWorkers[i] = append(rowsFromWorkers[i], bottomRow)
+					}
+
+					// Send the top and bottom rows to each worker
+					for i, _ := range rowsFromWorkers {
+						topRowPos, bottomRowPos := i - 1, i + 1
+						if i == 0 {
+							topRowPos = len(rowsFromWorkers) - 1
+						}
+						if i == len(rowsFromWorkers) - 1 {
+							bottomRowPos = 0
+						}
+						sendRowToWorker(rowsFromWorkers[topRowPos][0], (*workers)[i])
+						sendRowToWorker(rowsFromWorkers[bottomRowPos][1], (*workers)[i])
+					}
+
 					mutexWorkers.Lock()
 					select {
 					case <-send:
