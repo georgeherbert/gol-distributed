@@ -164,15 +164,13 @@ func main() {
 			sendRowToEngine(nextWorld[len(nextWorld) - 1], engine)
 
 			// Receive a new top row and bottom row from the controller
-			//world[0] = receiveRowFromEngine(width, messages)
-			//world[len(world) - 1] = receiveRowFromEngine(width, messages)
 			topRow := receiveRowFromEngine(width, messages)
 			bottomRow := receiveRowFromEngine(width, messages)
 
 			// Add the new top and bottom rows to the next world
-			world = [][]byte{bottomRow}
+			world = [][]byte{topRow}
 			world = append(world, nextWorld...)
-			world = append(world, topRow)
+			world = append(world, bottomRow)
 
 			status := <-messages
 			if status == "DONE\n" {

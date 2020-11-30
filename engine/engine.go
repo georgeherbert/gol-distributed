@@ -285,7 +285,7 @@ func main() {
 					mutexTurnsWorld.Lock()
 					numAliveCells := 0
 					for _, channel := range (*messagesWorker)[:threads] {
-						numAliveCellsPartString := <-channel // TODO: Number of alive cells should be received from all workers
+						numAliveCellsPartString := <-channel
 						numAliveCellsPart := netStringToInt(numAliveCellsPartString)
 						numAliveCells += numAliveCellsPart
 					}
@@ -302,15 +302,15 @@ func main() {
 
 					// Send the top and bottom rows to each worker
 					for i, _ := range rowsFromWorkers {
-						topRowPos, bottomRowPos := i - 1, i + 1
+						workerAbove, workerBelow := i - 1, i + 1
 						if i == 0 {
-							topRowPos = len(rowsFromWorkers) - 1
+							workerAbove = len(rowsFromWorkers) - 1
 						}
 						if i == len(rowsFromWorkers) - 1 {
-							bottomRowPos = 0
+							workerBelow = 0
 						}
-						sendRowToWorker(rowsFromWorkers[topRowPos][0], (*workers)[i])
-						sendRowToWorker(rowsFromWorkers[bottomRowPos][1], (*workers)[i])
+						sendRowToWorker(rowsFromWorkers[workerAbove][1], (*workers)[i])
+						sendRowToWorker(rowsFromWorkers[workerBelow][0], (*workers)[i])
 					}
 
 					mutexWorkers.Lock()
