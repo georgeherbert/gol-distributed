@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"flag"
 	"fmt"
 	"net"
 	"strconv"
@@ -142,7 +143,9 @@ func sendWorldToEngine(engine net.Conn, world [][]byte) {
 }
 
 func main() {
-	engine, _ := net.Dial("tcp", "127.0.0.1:8040")
+	addressPtr := flag.String("address_engine", "127.0.0.1:8040", "Specify the address of the GoL engine. Defaults to 127.0.0.1:8040.")
+	flag.Parse()
+	engine, _ := net.Dial("tcp", *addressPtr)
 	messages := make(chan string)
 	go handleEngine(engine, messages)
 

@@ -148,7 +148,7 @@ func writeFile(world [][]byte, fileName string, turns int, ioCommand chan<- ioCo
 // Distributor divides the work between workers and interacts with other goroutines.
 func controller(p Params, c distributorChannels) {
 	// Dials the engine and establishes reader
-	conn, _ := net.Dial("tcp", "127.0.0.1:8030")
+	conn, _ := net.Dial("tcp", p.Engine)
 	reader := bufio.NewReader(conn)
 
 	//TODO: Make it so this doesn't have to be specified when reconnecting

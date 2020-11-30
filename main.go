@@ -41,7 +41,13 @@ func main() {
 		&params.Rejoin,
 		"rejoin",
 		false,
-		"Specify whether you are trying to rejoin a GoL board that is currently executing.")
+		"Specify whether you are trying to rejoin a GoL board that is currently executing. Defaults to false.")
+
+	flag.StringVar(
+		&params.Engine,
+		"address_engine",
+		"127.0.0.1:8030",
+		"Specify the address of the GoL engine. Defaults to 127.0.0.1:8030.")
 
 	flag.Parse()
 
