@@ -166,7 +166,6 @@ func main() {
 			// Receive a new top row and bottom row from the controller
 			topRow := receiveRowFromEngine(width, messages)
 			bottomRow := receiveRowFromEngine(width, messages)
-			fmt.Println("Received new rows")
 
 			// Add the new top and bottom rows to the next world
 			world = [][]byte{topRow}
