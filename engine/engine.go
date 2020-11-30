@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"sync"
 	"time"
+	"math"
 )
 
 func handleConnection(conn net.Conn, messages chan<- string) {
@@ -98,8 +99,8 @@ func sendPartToWorker(part [][]byte, worker net.Conn) {
 	writer.Flush()
 }
 
-func sendToAll(connections *[]net.Conn, value string) {
-	for _, conn := range *connections {
+func sendToAll(connections []net.Conn, value string) {
+	for _, conn := range connections {
 		fmt.Fprintf(conn, value)
 	}
 }
@@ -116,9 +117,9 @@ func ticker(mutexDone *sync.Mutex, done *bool, mutexControllers *sync.Mutex, mut
 				mutexControllers.Lock()
 				mutexTurnsWorld.Lock()
 				fmt.Printf("%d Turns Completed\n", *completedTurns)
-				sendToAll(controllers, "REPORT_ALIVE\n")
-				sendToAll(controllers, fmt.Sprintf("%d\n", *completedTurns))
-				sendToAll(controllers, fmt.Sprintf("%d\n", *numAliveCells))
+				sendToAll(*controllers, "REPORT_ALIVE\n")
+				sendToAll(*controllers, fmt.Sprintf("%d\n", *completedTurns))
+				sendToAll(*controllers, fmt.Sprintf("%d\n", *numAliveCells))
 				mutexTurnsWorld.Unlock()
 				mutexControllers.Unlock()
 			} else {
@@ -140,12 +141,12 @@ func handleKeyPresses(messagesController <-chan string, mutexControllers *sync.M
 			mutexControllers.Lock()
 			mutexTurnsWorld.Lock()
 			if paused {
-				sendToAll(controllers, "RESUMING\n")
+				sendToAll(*controllers, "RESUMING\n")
 			} else {
-				sendToAll(controllers, "PAUSING\n")
+				sendToAll(*controllers, "PAUSING\n")
 			}
 			paused = !paused
-			sendToAll(controllers, fmt.Sprintf("%d\n", *completedTurns))
+			sendToAll(*controllers, fmt.Sprintf("%d\n", *completedTurns))
 			mutexTurnsWorld.Unlock()
 			mutexControllers.Unlock()
 			fmt.Println("Paused/Resumed")
@@ -188,10 +189,18 @@ func receiveRowFromWorker(width int, messages <-chan string) []byte {
 	return row
 }
 
-func receiveWorldFromWorkers(height int, sectionHeight int, width int, messagesChannels []chan string) [][]byte {
+func receiveWorldFromWorkers(height int, sectionHeight int, lastSectionHeight int, width int, messagesChannels []chan string) [][]byte {
 	world := make([][]byte, height)
+	rowsReceived := 0
 	for _, channel := range messagesChannels {
-		part := make([][]byte, sectionHeight)
+		var part [][]byte
+		var partHeight int
+		if lastSectionHeight != height - rowsReceived {
+			partHeight = sectionHeight
+		} else {
+			partHeight = lastSectionHeight
+		}
+		part = make([][]byte, partHeight)
 		for y := range part {
 			part[y] = make([]byte, width)
 		}
@@ -203,6 +212,7 @@ func receiveWorldFromWorkers(height int, sectionHeight int, width int, messagesC
 			}
 		}
 		world = append(world, part...)
+		rowsReceived += partHeight
 	}
 	return world
 }
@@ -261,8 +271,18 @@ func main() {
 
 				mutexWorkers.Lock()
 				sectionHeight := height / threads
-				sendToAll(&workersUsed, fmt.Sprintf("%d\n", sectionHeight))
-				sendToAll(&workersUsed, widthString)
+				var lastSectionHeight int
+				if math.Mod(float64(height), float64(threads)) == 0 {
+					lastSectionHeight = sectionHeight
+				} else {
+					lastSectionHeight = height - ((threads - 1) * sectionHeight)
+				}
+
+				sendToAll(workersUsed[:threads - 1], fmt.Sprintf("%d\n", sectionHeight))
+				fmt.Fprintf(workersUsed[threads - 1], "%d\n", lastSectionHeight)
+
+				sendToAll(workersUsed, widthString)
+
 				for i := 0; i < threads; i++ {
 					startY := i * sectionHeight
 					endY := startY + sectionHeight
@@ -318,14 +338,14 @@ func main() {
 					mutexWorkers.Lock()
 					select {
 					case <-send:
-						sendToAll(&workersUsed, "SEND_WORLD\n")
-						world = receiveWorldFromWorkers(height, sectionHeight, width, (*messagesWorker)[:threads])
+						sendToAll(workersUsed, "SEND_WORLD\n")
+						world = receiveWorldFromWorkers(height, sectionHeight, lastSectionHeight, width, (*messagesWorker)[:threads])
 						send <- true
 					default:
 						if completedTurns != turns {
-							sendToAll(&workersUsed, "CONTINUE\n")
+							sendToAll(workersUsed, "CONTINUE\n")
 						} else {
-							sendToAll(&workersUsed, "DONE\n")
+							sendToAll(workersUsed, "DONE\n")
 						}
 					}
 					mutexWorkers.Unlock()
@@ -333,7 +353,7 @@ func main() {
 				}
 
 				mutexTurnsWorld.Lock()
-				world = receiveWorldFromWorkers(height, sectionHeight, width, (*messagesWorker)[:threads])
+				world = receiveWorldFromWorkers(height, sectionHeight, lastSectionHeight, width, (*messagesWorker)[:threads])
 				mutexTurnsWorld.Unlock()
 			}
 
@@ -341,7 +361,7 @@ func main() {
 			mutexDone.Lock()
 			done = true
 			mutexControllers.Lock()
-			sendToAll(controllers, "DONE\n")
+			sendToAll(*controllers, "DONE\n")
 			mutexControllers.Unlock()
 			mutexDone.Unlock()
 
