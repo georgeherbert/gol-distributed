@@ -132,7 +132,7 @@ func ticker(mutexDone *sync.Mutex, done *bool, mutexControllers *sync.Mutex, mut
 
 // Received key presses from the controller and processes them
 func handleKeyPresses(messagesController <-chan string, mutexControllers *sync.Mutex, mutexTurnsWorld *sync.Mutex,
-	controllers *[]net.Conn, world *[][]byte, completedTurns *int, pause chan<- bool, send chan bool) {
+	controllers *[]net.Conn, world *[][]byte, completedTurns *int, pause chan<- bool, send chan bool, shutDown chan bool) {
 	paused := false
 	for {
 		action := <-messagesController
@@ -164,6 +164,9 @@ func handleKeyPresses(messagesController <-chan string, mutexControllers *sync.M
 				mutexTurnsWorld.Unlock()
 				mutexControllers.Unlock()
 				fmt.Println("Sent World")
+			} else if action == "SHUT_DOWN\n" {
+				shutDown <- true
+
 			} else if action == "QUIT\n" {
 				fmt.Println("A controller has quit")
 			}  else if action == "DONE\n" {
@@ -250,7 +253,8 @@ func main() {
 	workers := new([]net.Conn)
 	go handleNewWorkers(lnWorker, messagesWorker, mutexWorkers, workers)
 
-	for {
+	shutDown := false
+	for !shutDown {
 		if <-messagesController == "INITIALISE\n" { // This stops a new connection attempting to rejoin once all turns are complete breaking the engine
 			heightString, widthString, turnsString, threadsString := <-messagesController, <-messagesController, <-messagesController, <-messagesController
 			height, width, turns, threads := netStringToInt(heightString), netStringToInt(widthString), netStringToInt(turnsString), netStringToInt(threadsString)
@@ -296,7 +300,9 @@ func main() {
 
 				pause := make(chan bool)
 				send := make(chan bool)
-				go handleKeyPresses(messagesController, mutexControllers, mutexTurnsWorld, controllers, &world, &completedTurns, pause, send)
+				shutDownChan := make(chan bool)
+				go handleKeyPresses(messagesController, mutexControllers, mutexTurnsWorld, controllers, &world,
+					&completedTurns, pause, send, shutDownChan)
 
 				for turn := 0; turn < turns; turn++ {
 					select {
@@ -341,6 +347,10 @@ func main() {
 						sendToAll(workersUsed, "SEND_WORLD\n")
 						world = receiveWorldFromWorkers(height, sectionHeight, lastSectionHeight, width, (*messagesWorker)[:threads])
 						send <- true
+					case <-shutDownChan:
+						turn = turns
+						sendToAll(*workers, "SHUT_DOWN\n")
+						shutDown = true
 					default:
 						if completedTurns != turns {
 							sendToAll(workersUsed, "CONTINUE\n")
@@ -379,4 +389,5 @@ func main() {
 			mutexControllers.Unlock()
 		}
 	}
+	sendToAll(*controllers, "SHUTTING_DOWN\n")
 }

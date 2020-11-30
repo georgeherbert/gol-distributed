@@ -45,12 +45,14 @@ func manageKeyPresses(keyPresses <-chan rune, quit chan<- bool, conn net.Conn) {
 			quit <- true
 		} else if key == 112 { // pause/resume
 			fmt.Fprintf(conn, "PAUSE\n")
+		} else if key == 107 { // shutdown
+			fmt.Fprintf(conn, "SHUT_DOWN\n")
 		}
 	}
 }
 
 func handleEngine(events chan<- Event, reader *bufio.Reader, done chan<- bool, imageHeight int, imageWidth int,
-	fileName string, ioCommand chan<- ioCommand, ioFileName chan<- string, ioOutput chan<- uint8) {
+	fileName string, ioCommand chan<- ioCommand, ioFileName chan<- string, ioOutput chan<- uint8, quit chan<- bool) {
 	for {
 		operation, _ := reader.ReadString('\n')
 		if operation == "REPORT_ALIVE\n" {
@@ -58,9 +60,12 @@ func handleEngine(events chan<- Event, reader *bufio.Reader, done chan<- bool, i
 		} else if operation == "DONE\n" {
 			done <- true
 			break // Stops loop trying to receive inputs as would otherwise receive the cell values as inputs
-		} else if operation == "SENDING_WORLD\n" {
+		} else if operation == "SENDING_WORLD\n" || operation == "SHUTTING_DOWN\n" {
 			world, completedTurns := receiveWorld(imageHeight, imageWidth, reader)
 			writeFile(world, fileName, completedTurns, ioCommand, ioFileName, ioOutput, events)
+			if operation == "SHUTTING_DOWN\n" {
+				quit <- true
+			}
 		} else if operation == "PAUSING\n" || operation == "RESUMING\n" {
 			completedTurnsString, _ := reader.ReadString('\n')
 			completedTurns := netStringToInt(completedTurnsString)
@@ -165,7 +170,7 @@ func controller(p Params, c distributorChannels) {
 	quit := make(chan bool)
 	go manageKeyPresses(c.keyPresses, quit, conn)
 	done := make(chan bool) // Used to stop execution until the turns are done executing otherwise receiveWorld will start trying to receive
-	go handleEngine(c.events, reader, done, p.ImageHeight, p.ImageWidth, fileName, c.ioCommand, c.ioFileName, c.ioOutput) // Report the alive cells until the engine is done
+	go handleEngine(c.events, reader, done, p.ImageHeight, p.ImageWidth, fileName, c.ioCommand, c.ioFileName, c.ioOutput, quit) // Report the alive cells until the engine is done
 	select {
 	case <-done:
 		// Receives the world back from the server once all rounds are complete

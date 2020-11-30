@@ -145,8 +145,14 @@ func main() {
 	engine, _ := net.Dial("tcp", "127.0.0.1:8040")
 	messages := make(chan string)
 	go handleEngine(engine, messages)
-	for {
-		heightString, widthString := <-messages, <-messages
+
+	shutDown := false
+	for !shutDown {
+		heightString := <-messages
+		if heightString == "SHUT_DOWN\n" { // Because worker may not be used, so the first thing it could receive is a shut down message
+			break
+		}
+		widthString := <-messages
 		height, width := netStringToInt(heightString), netStringToInt(widthString)
 		heightToReceive := height + 2
 		world := initialiseWorld(heightToReceive, width, messages)
@@ -174,6 +180,9 @@ func main() {
 
 			status := <-messages
 			if status == "DONE\n" {
+				break
+			} else if status == "SHUT_DOWN\n" {
+				shutDown = true
 				break
 			} else if status == "SEND_WORLD\n" {
 				sendWorldToEngine(engine, world)
