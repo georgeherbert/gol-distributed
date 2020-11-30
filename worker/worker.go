@@ -54,7 +54,6 @@ func getNeighbours(world [][]byte, row int, column int) []byte {
 	} else if column == len(world[0]) - 1 {
 		columnRight = 0
 	}
-	//fmt.Println(row, column)
 	neighbours := []byte{world[rowAbove][columnLeft], world[rowAbove][column], world[rowAbove][columnRight],
 		world[row][columnLeft], world[row][columnRight], world[rowBelow][columnLeft], world[rowBelow][column],
 		world[rowBelow][columnRight]}

@@ -283,8 +283,12 @@ func main() {
 					default:
 					}
 					mutexTurnsWorld.Lock()
-					numAliveCellsString := <-(*messagesWorker)[0] // TODO: Number of alive cells should be received from all workers
-					numAliveCells = netStringToInt(numAliveCellsString)
+					numAliveCells := 0
+					for _, channel := range (*messagesWorker)[:threads] {
+						numAliveCellsPartString := <-channel // TODO: Number of alive cells should be received from all workers
+						numAliveCellsPart := netStringToInt(numAliveCellsPartString)
+						numAliveCells += numAliveCellsPart
+					}
 					completedTurns = turn + 1
 
 					// Receive the top and bottom rows from each worker
