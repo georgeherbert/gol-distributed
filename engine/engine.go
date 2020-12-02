@@ -196,6 +196,18 @@ func ticker(mutexDone *sync.Mutex, done *bool, mutexControllers *sync.Mutex, mut
 	}
 }
 
+// Returns the world with its values filled
+func sendWorld(world [][]byte, conn net.Conn, completedTurns int) {
+	fmt.Fprintf(conn, "%d\n", completedTurns)
+	writer := bufio.NewWriter(conn)
+	for _, row := range world {
+		for _, element := range row {
+			writer.WriteString(fmt.Sprintf( "%d\n", element))
+		}
+	}
+	writer.Flush()
+}
+
 // Received key presses from the controller and processes them
 func handleKeyPresses(messagesController <-chan string, mutexControllers *sync.Mutex, mutexTurnsWorld *sync.Mutex,
 	controllers *[]net.Conn, world *[][]byte, completedTurns *int, pause chan<- bool, send chan bool, shutDown chan bool) {
@@ -294,27 +306,6 @@ func sendRowsToWorkers(rowsFromWorkersSlice []rowsFromWorkers, workersUsed []net
 	}
 }
 
-func sendCommandToWorkers(send chan bool, workersUsed []net.Conn, height int, sectionHeights []int, width int,
-	messagesWorker *[]chan string, threads int, world *[][]byte, shutDownChan chan bool, turn *int, turns int,
-	workers *[]net.Conn, shutDown *bool, completedTurns int) {
-	select {
-	case <-send:
-		sendToAll(workersUsed, "SEND_WORLD\n")
-		*world = receiveWorldFromWorkers(height, sectionHeights, width, (*messagesWorker)[:threads])
-		send <- true
-	case <-shutDownChan:
-		*turn = turns
-		sendToAll(*workers, "SHUT_DOWN\n")
-		*shutDown = true
-	default:
-		if completedTurns != turns {
-			sendToAll(workersUsed, "CONTINUE\n")
-		} else {
-			sendToAll(workersUsed, "DONE\n")
-		}
-	}
-}
-
 // Receive the top and bottom rows from each worker
 func receiveWorldFromWorkers(height int, sectionHeights []int, width int, messagesChannels []chan string) [][]byte {
 	world := make([][]byte, height)
@@ -336,16 +327,48 @@ func receiveWorldFromWorkers(height int, sectionHeights []int, width int, messag
 	return world
 }
 
-// Returns the world with its final values filled
-func sendWorld(world [][]byte, conn net.Conn, completedTurns int) {
-	fmt.Fprintf(conn, "%d\n", completedTurns)
-	writer := bufio.NewWriter(conn)
-	for _, row := range world {
-		for _, element := range row {
-			writer.WriteString(fmt.Sprintf( "%d\n", element))
+func sendCommandToWorkers(send chan bool, workersUsed []net.Conn, height int, sectionHeights []int, width int,
+	messagesWorker *[]chan string, threads int, world *[][]byte, shutDownChan chan bool, turn *int, turns int,
+	workers *[]net.Conn, shutDown *bool, completedTurns int) {
+	select {
+	case <-send:
+		sendToAll(workersUsed, "SEND_WORLD\n")
+		*world = receiveWorldFromWorkers(height, sectionHeights, width, (*messagesWorker)[:threads])
+		send <- true
+	case <-shutDownChan:
+		*turn = turns
+		sendToAll(*workers, "SHUT_DOWN\n")
+		*shutDown = true
+	default:
+		if completedTurns != turns {
+			sendToAll(workersUsed, "CONTINUE\n")
+		} else {
+			sendToAll(workersUsed, "DONE\n")
 		}
 	}
-	writer.Flush()
+}
+
+func performAllTurns(turns int, pause <-chan bool, mutexTurnsWorld *sync.Mutex, numAliveCells *int,
+	messagesWorker *[]chan string, threads int, completedTurns *int, width int, workersUsed []net.Conn,
+	mutexWorkers *sync.Mutex, send chan bool, height int, sectionHeights []int, world *[][]byte,
+	shutDownChan chan bool, workers *[]net.Conn, shutDown *bool) {
+	for turn := 0; turn < turns; turn++ {
+		select {
+		case <-pause:
+			<-pause
+		default: // If the controller has not requested a pause just move onto performing the next turn of the world
+		}
+		mutexTurnsWorld.Lock()
+		*numAliveCells = getNumAliveCells(messagesWorker, threads)
+		*completedTurns = turn + 1
+		rowsFromWorkersSlice := getRowsFromWorkers(threads, messagesWorker, width)
+		sendRowsToWorkers(rowsFromWorkersSlice, workersUsed)
+		mutexWorkers.Lock()
+		sendCommandToWorkers(send, workersUsed, height, sectionHeights, width, messagesWorker, threads,
+			world, shutDownChan, &turn, turns, workers, shutDown, *completedTurns)
+		mutexWorkers.Unlock()
+		mutexTurnsWorld.Unlock()
+	}
 }
 
 // Divides the work between workers, interacts with them and interacts with other subroutines
@@ -357,72 +380,59 @@ func main() {
 	messagesWorker, mutexWorkers, workers := setUpWorkers(portWorkerPtr)
 	shutDown := false
 	for !shutDown {
-		if <-messagesController == "INITIALISE\n" { // This stops a new connection attempting to rejoin once all turns are complete breaking the engine
-			height, width, turns, threads := getDetails(messagesController)
+		if <-messagesController != "INITIALISE\n" {
+			continue
+		} // This stops a new connection attempting to rejoin once all turns are complete breaking the engine
+		height, width, turns, threads := getDetails(messagesController)
+		mutexWorkers.Lock()
+		workersUsed := (*workers)[:threads]
+		mutexWorkers.Unlock()
+		done := false
+		completedTurns := 0
+		mutexDone := &sync.Mutex{}
+		mutexTurnsWorld := &sync.Mutex{}
+		world := initialiseWorld(height, width, messagesController)
+		if turns > 0 {     // If there are more than 0 turns, process them
+			fmt.Println("Received details")
+			sectionHeights := calcSectionHeights(height, threads)
+			startYValues := calcStartYValues(sectionHeights)
 			mutexWorkers.Lock()
-			workersUsed := (*workers)[:threads]
+			for i, worker := range workersUsed {
+				fmt.Fprintf(worker, "%d\n", sectionHeights[i])
+			}
+			sendToAll(workersUsed, fmt.Sprintf("%d\n", width))
+			for i := 0; i < threads; i++ {
+				startY := startYValues[i]
+				endY := startY + sectionHeights[i]
+				part := getPart(world, threads, i, startY, endY)
+				sendPartToWorker(part, (*workers)[i])
+			}
 			mutexWorkers.Unlock()
-			done := false
-			completedTurns := 0
-			mutexDone := &sync.Mutex{}
-			mutexTurnsWorld := &sync.Mutex{}
-			world := initialiseWorld(height, width, messagesController)
-			if turns > 0 {     // If there are more than 0 turns, process them
-				fmt.Println("Received details")
-				mutexWorkers.Lock()
-				sectionHeights := calcSectionHeights(height, threads)
-				for i, worker := range workersUsed {
-					fmt.Fprintf(worker, "%d\n", sectionHeights[i])
-				}
-				sendToAll(workersUsed, fmt.Sprintf("%d\n", width))
-				startYValues := calcStartYValues(sectionHeights)
-				for i := 0; i < threads; i++ {
-					startY := startYValues[i]
-					endY := startY + sectionHeights[i]
-					part := getPart(world, threads, i, startY, endY)
-					sendPartToWorker(part, (*workers)[i])
-				}
-				mutexWorkers.Unlock()
-				numAliveCells := 0
-				go ticker(mutexDone, &done, mutexControllers, mutexTurnsWorld, &completedTurns, controllers, &numAliveCells)
-				pause := make(chan bool)
-				send := make(chan bool)
-				shutDownChan := make(chan bool)
-				go handleKeyPresses(messagesController, mutexControllers, mutexTurnsWorld, controllers, &world,
-					&completedTurns, pause, send, shutDownChan)
-				for turn := 0; turn < turns; turn++ {
-					select {
-					case <-pause:
-						<-pause
-					default: // If the controller has not requested a pause just move onto performing the next turn of the world
-					}
-					mutexTurnsWorld.Lock()
-					numAliveCells = getNumAliveCells(messagesWorker, threads)
-					completedTurns = turn + 1
-					rowsFromWorkersSlice := getRowsFromWorkers(threads, messagesWorker, width)
-					sendRowsToWorkers(rowsFromWorkersSlice, workersUsed)
-					mutexWorkers.Lock()
-					sendCommandToWorkers(send, workersUsed, height, sectionHeights, width, messagesWorker, threads,
-						&world, shutDownChan, &turn, turns, workers, &shutDown, completedTurns)
-					mutexWorkers.Unlock()
-					mutexTurnsWorld.Unlock()
-				}
-				mutexTurnsWorld.Lock()
-				world = receiveWorldFromWorkers(height, sectionHeights, width, (*messagesWorker)[:threads])
-				mutexTurnsWorld.Unlock()
-			}
-			// Once it has done all the iterations, send a message to the controller to let it know it is done
-			mutexDone.Lock()
-			mutexControllers.Lock()
-			done = true
-			sendToAll(*controllers, "DONE\n")
-			mutexDone.Unlock()
-			for _, conn := range *controllers { // Send the world back to all of the controllers
-				sendWorld(world, conn, completedTurns)
-			}
-			*controllers = (*controllers)[:0] // Clear the controllers once processing the current board is finished
-			mutexControllers.Unlock()
+			numAliveCells := 0
+			go ticker(mutexDone, &done, mutexControllers, mutexTurnsWorld, &completedTurns, controllers, &numAliveCells)
+			pause := make(chan bool)
+			send := make(chan bool)
+			shutDownChan := make(chan bool)
+			go handleKeyPresses(messagesController, mutexControllers, mutexTurnsWorld, controllers, &world,
+				&completedTurns, pause, send, shutDownChan)
+			performAllTurns(turns, pause, mutexTurnsWorld, &numAliveCells, messagesWorker, threads, &completedTurns,
+				width, workersUsed, mutexWorkers, send, height, sectionHeights, &world, shutDownChan,
+				workers, &shutDown)
+			mutexTurnsWorld.Lock()
+			world = receiveWorldFromWorkers(height, sectionHeights, width, (*messagesWorker)[:threads])
+			mutexTurnsWorld.Unlock()
 		}
+		// Once it has done all the iterations, send a message to the controller to let it know it is done
+		mutexDone.Lock()
+		mutexControllers.Lock()
+		done = true
+		sendToAll(*controllers, "DONE\n")
+		mutexDone.Unlock()
+		for _, conn := range *controllers { // Send the world back to all of the controllers
+			sendWorld(world, conn, completedTurns)
+		}
+		*controllers = (*controllers)[:0] // Clear the controllers once processing the current board is finished
+		mutexControllers.Unlock()
 	}
 	sendToAll(*controllers, "SHUTTING_DOWN\n")
 }
