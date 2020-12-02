@@ -12,7 +12,7 @@ func BenchmarkGol (b *testing.B) {
 		b.Run(fmt.Sprint(thread), func(b *testing.B) {
 			os.Stdout = nil // Disable all program output apart from benchmark results
 			params := gol.Params{
-				Turns:       25,
+				Turns:       100,
 				Threads:     thread,
 				ImageWidth:  5120,
 				ImageHeight: 5120,
