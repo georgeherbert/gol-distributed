@@ -34,6 +34,16 @@ func handleNewControllers(ln net.Listener, messages chan<- string, mutex *sync.M
 	}
 }
 
+// Sets up connections and channel for the controller
+func setUpControllers(portControllerPtr *string) (chan string, *sync.Mutex, *[]net.Conn) {
+	lnController, _ := net.Listen("tcp", *portControllerPtr)
+	messagesController := make(chan string)
+	mutexControllers := &sync.Mutex{} // Used whenever sending data to client to stop multiple things being sent at once
+	controllers := new([]net.Conn)
+	go handleNewControllers(lnController, messagesController, mutexControllers, controllers)
+	return messagesController, mutexControllers, controllers
+}
+
 // Handles workers joining by adding them to the slice of workers and passing them to the handleConnections function
 func handleNewWorkers(ln net.Listener, messagesSlice *[]chan string, mutex *sync.Mutex, connections *[]net.Conn) {
 	for {
@@ -48,10 +58,32 @@ func handleNewWorkers(ln net.Listener, messagesSlice *[]chan string, mutex *sync
 	}
 }
 
+// Sets up connections and channels for the workers
+func setUpWorkers(portWorkerPtr *string) (*[]chan string, *sync.Mutex, *[]net.Conn) {
+	lnWorker, _ := net.Listen("tcp", *portWorkerPtr)
+	messagesWorker := new([]chan string)
+	mutexWorkers := &sync.Mutex{}
+	workers := new([]net.Conn)
+	go handleNewWorkers(lnWorker, messagesWorker, mutexWorkers, workers)
+	return messagesWorker, mutexWorkers, workers
+}
+
 // Converts a string receives over tcp to an integer
 func netStringToInt(netString string) int {
 	integer, _ := strconv.Atoi(netString[:len(netString)-1])
 	return integer
+}
+
+func getDetails(messagesController <-chan string) (int, int, int, int) {
+	heightString := <-messagesController
+	widthString := <-messagesController
+	turnsString := <-messagesController
+	threadsString := <-messagesController
+	height := netStringToInt(heightString)
+	width := netStringToInt(widthString)
+	turns := netStringToInt(turnsString)
+	threads := netStringToInt(threadsString)
+	return height, width, turns, threads
 }
 
 // Initialises the world, getting the values from the server (only used if there are 0 turns)
@@ -256,23 +288,12 @@ func main() {
 	portControllerPtr := flag.String("port_controller", ":8030", "port to listen on for controllers")
 	portWorkerPtr := flag.String("port_worker", ":8040", "port to listen on")
 	flag.Parse()
-	// Sets up connections and channel for the controller
-	lnController, _ := net.Listen("tcp", *portControllerPtr)
-	messagesController := make(chan string)
-	mutexControllers := &sync.Mutex{} // Used whenever sending data to client to stop multiple things being sent at once
-	controllers := new([]net.Conn)
-	go handleNewControllers(lnController, messagesController, mutexControllers, controllers)
-	// Sets up connections and channels for the workers
-	lnWorker, _ := net.Listen("tcp", *portWorkerPtr)
-	messagesWorker := new([]chan string)
-	mutexWorkers := &sync.Mutex{}
-	workers := new([]net.Conn)
-	go handleNewWorkers(lnWorker, messagesWorker, mutexWorkers, workers)
+	messagesController, mutexControllers, controllers := setUpControllers(portControllerPtr)
+	messagesWorker, mutexWorkers, workers := setUpWorkers(portWorkerPtr)
 	shutDown := false
 	for !shutDown {
 		if <-messagesController == "INITIALISE\n" { // This stops a new connection attempting to rejoin once all turns are complete breaking the engine
-			heightString, widthString, turnsString, threadsString := <-messagesController, <-messagesController, <-messagesController, <-messagesController
-			height, width, turns, threads := netStringToInt(heightString), netStringToInt(widthString), netStringToInt(turnsString), netStringToInt(threadsString)
+			height, width, turns, threads := getDetails(messagesController)
 			mutexWorkers.Lock()
 			workersUsed := (*workers)[:threads]
 			mutexWorkers.Unlock()
@@ -288,7 +309,7 @@ func main() {
 				for i, worker := range workersUsed {
 					fmt.Fprintf(worker, "%d\n", sectionHeights[i])
 				}
-				sendToAll(workersUsed, widthString)
+				sendToAll(workersUsed, fmt.Sprintf("%d\n", width))
 				startYValues := calcStartYValues(sectionHeights)
 				for i := 0; i < threads; i++ {
 					startY := startYValues[i]
