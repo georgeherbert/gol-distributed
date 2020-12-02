@@ -144,49 +144,52 @@ func writeFile(world [][]byte, fileName string, turns int, ioCommand chan<- ioCo
 	}
 }
 
-//TODO: Look into bufio Writer https://medium.com/golangspec/introduction-to-bufio-package-in-golang-ad7d1877f762
 // Distributor divides the work between workers and interacts with other goroutines.
 func controller(p Params, c distributorChannels) {
 	// Dials the engine and establishes reader
-	conn, _ := net.Dial("tcp", p.Engine)
-	reader := bufio.NewReader(conn)
+	conn, err := net.Dial("tcp", p.Engine)
+	if err == nil {
+		reader := bufio.NewReader(conn)
 
-	//TODO: Make it so this doesn't have to be specified when reconnecting
-	fileName := strconv.Itoa(p.ImageWidth) + "x" + strconv.Itoa(p.ImageHeight)
+		//TODO: Make it so this doesn't have to be specified when reconnecting
+		fileName := strconv.Itoa(p.ImageWidth) + "x" + strconv.Itoa(p.ImageHeight)
 
-	if p.Rejoin == false {
-		fmt.Fprintf(conn, "INITIALISE\n")
+		if p.Rejoin == false {
+			fmt.Fprintf(conn, "INITIALISE\n")
 
-		sendFileName(fileName, c.ioCommand, c.ioFileName)
+			sendFileName(fileName, c.ioCommand, c.ioFileName)
 
-		fmt.Fprintf(conn, "%d\n", p.ImageHeight) // Send image height to server
-		fmt.Fprintf(conn, "%d\n", p.ImageWidth)  // Send image width to server
-		fmt.Fprintf(conn, "%d\n", p.Turns)       // Send number of turns to server
-		fmt.Fprintf(conn, "%d\n", p.Threads)     // Send number of threads to server
+			fmt.Fprintf(conn, "%d\n", p.ImageHeight) // Send image height to server
+			fmt.Fprintf(conn, "%d\n", p.ImageWidth)  // Send image width to server
+			fmt.Fprintf(conn, "%d\n", p.Turns)       // Send number of turns to server
+			fmt.Fprintf(conn, "%d\n", p.Threads)     // Send number of threads to server
 
-		sendWorld(p.ImageHeight, p.ImageWidth, c.ioInput, conn) // Send the world to the server
-	}
-
-	quit := make(chan bool)
-	go manageKeyPresses(c.keyPresses, quit, conn)
-	done := make(chan bool) // Used to stop execution until the turns are done executing otherwise receiveWorld will start trying to receive
-	go handleEngine(c.events, reader, done, p.ImageHeight, p.ImageWidth, fileName, c.ioCommand, c.ioFileName, c.ioOutput, quit) // Report the alive cells until the engine is done
-	select {
-	case <-done:
-		// Receives the world back from the server once all rounds are complete
-		world, completedTurns := receiveWorld(p.ImageHeight, p.ImageWidth, reader)
-		fmt.Fprintf(conn, "DONE\n") // Sends this message back to the controller to let it know it has receives the message
-		// Once the final turn is complete
-		aliveCells := getAliveCells(world)
-		c.events <- FinalTurnComplete{
-			CompletedTurns: completedTurns,
-			Alive:          aliveCells,
+			sendWorld(p.ImageHeight, p.ImageWidth, c.ioInput, conn) // Send the world to the server
 		}
-		writeFile(world, fileName, completedTurns, c.ioCommand, c.ioFileName, c.ioOutput, c.events)
-		c.ioCommand <- ioCheckIdle // Make sure that the Io has finished any output before exiting.
-		<-c.ioIdle
-		c.events <- StateChange{completedTurns, Quitting}
-	case <-quit:
+
+		quit := make(chan bool)
+		go manageKeyPresses(c.keyPresses, quit, conn)
+		done := make(chan bool)                                                                                                     // Used to stop execution until the turns are done executing otherwise receiveWorld will start trying to receive
+		go handleEngine(c.events, reader, done, p.ImageHeight, p.ImageWidth, fileName, c.ioCommand, c.ioFileName, c.ioOutput, quit) // Report the alive cells until the engine is done
+		select {
+		case <-done:
+			// Receives the world back from the server once all rounds are complete
+			world, completedTurns := receiveWorld(p.ImageHeight, p.ImageWidth, reader)
+			fmt.Fprintf(conn, "DONE\n") // Sends this message back to the controller to let it know it has receives the message
+			// Once the final turn is complete
+			aliveCells := getAliveCells(world)
+			c.events <- FinalTurnComplete{
+				CompletedTurns: completedTurns,
+				Alive:          aliveCells,
+			}
+			writeFile(world, fileName, completedTurns, c.ioCommand, c.ioFileName, c.ioOutput, c.events)
+			c.ioCommand <- ioCheckIdle // Make sure that the Io has finished any output before exiting.
+			<-c.ioIdle
+			c.events <- StateChange{completedTurns, Quitting}
+		case <-quit:
+		}
+	} else {
+		fmt.Printf("Error: no engine at address %s\n", p.Engine)
 	}
 	close(c.events) // Close the channel to stop the SDL goroutine gracefully. Removing may cause deadlock.
 }

@@ -145,11 +145,19 @@ func sendWorldToEngine(engine net.Conn, world [][]byte) {
 func main() {
 	addressPtr := flag.String("address_engine", "127.0.0.1:8040", "Specify the address of the GoL engine. Defaults to 127.0.0.1:8040.")
 	flag.Parse()
-	engine, _ := net.Dial("tcp", *addressPtr)
-	messages := make(chan string)
-	go handleEngine(engine, messages)
-
 	shutDown := false
+
+	engine, err := net.Dial("tcp", *addressPtr)
+	messages := make(chan string)
+	if err == nil {
+		go handleEngine(engine, messages)
+	} else {
+		fmt.Printf("Error: no engine at address %s\n", *addressPtr)
+		shutDown = true // Means it will never go into the loop
+	}
+
+
+
 	for !shutDown {
 		heightString := <-messages
 		if heightString == "SHUT_DOWN\n" { // Because worker may not be used, so the first thing it could receive is a shut down message
