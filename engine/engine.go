@@ -294,6 +294,27 @@ func sendRowsToWorkers(rowsFromWorkersSlice []rowsFromWorkers, workersUsed []net
 	}
 }
 
+func sendCommandToWorkers(send chan bool, workersUsed []net.Conn, height int, sectionHeights []int, width int,
+	messagesWorker *[]chan string, threads int, world *[][]byte, shutDownChan chan bool, turn *int, turns int,
+	workers *[]net.Conn, shutDown *bool, completedTurns int) {
+	select {
+	case <-send:
+		sendToAll(workersUsed, "SEND_WORLD\n")
+		*world = receiveWorldFromWorkers(height, sectionHeights, width, (*messagesWorker)[:threads])
+		send <- true
+	case <-shutDownChan:
+		*turn = turns
+		sendToAll(*workers, "SHUT_DOWN\n")
+		*shutDown = true
+	default:
+		if completedTurns != turns {
+			sendToAll(workersUsed, "CONTINUE\n")
+		} else {
+			sendToAll(workersUsed, "DONE\n")
+		}
+	}
+}
+
 // Receive the top and bottom rows from each worker
 func receiveWorldFromWorkers(height int, sectionHeights []int, width int, messagesChannels []chan string) [][]byte {
 	world := make([][]byte, height)
@@ -381,22 +402,8 @@ func main() {
 					rowsFromWorkersSlice := getRowsFromWorkers(threads, messagesWorker, width)
 					sendRowsToWorkers(rowsFromWorkersSlice, workersUsed)
 					mutexWorkers.Lock()
-					select {
-					case <-send:
-						sendToAll(workersUsed, "SEND_WORLD\n")
-						world = receiveWorldFromWorkers(height, sectionHeights, width, (*messagesWorker)[:threads])
-						send <- true
-					case <-shutDownChan:
-						turn = turns
-						sendToAll(*workers, "SHUT_DOWN\n")
-						shutDown = true
-					default:
-						if completedTurns != turns {
-							sendToAll(workersUsed, "CONTINUE\n")
-						} else {
-							sendToAll(workersUsed, "DONE\n")
-						}
-					}
+					sendCommandToWorkers(send, workersUsed, height, sectionHeights, width, messagesWorker, threads,
+						&world, shutDownChan, &turn, turns, workers, &shutDown, completedTurns)
 					mutexWorkers.Unlock()
 					mutexTurnsWorld.Unlock()
 				}
