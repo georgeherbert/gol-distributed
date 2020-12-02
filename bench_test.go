@@ -12,10 +12,10 @@ func BenchmarkGol (b *testing.B) {
 		b.Run(fmt.Sprint(thread), func(b *testing.B) {
 			os.Stdout = nil // Disable all program output apart from benchmark results
 			params := gol.Params{
-				Turns:       1000,
+				Turns:       100,
 				Threads:     thread,
-				ImageWidth:  512,
-				ImageHeight: 512,
+				ImageWidth:  5120,
+				ImageHeight: 5120,
 				Engine:      "3.239.113.143:8030",
 			}
 			for i := 0; i < b.N; i++ {
@@ -30,4 +30,4 @@ func BenchmarkGol (b *testing.B) {
 	}
 }
 
-// Run with "go test -bench . bench_test.go
+// Run with "CGO_ENABLED=0 go test -bench . bench_test.go"
