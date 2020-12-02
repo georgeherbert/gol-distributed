@@ -191,6 +191,7 @@ func ticker(mutexDone *sync.Mutex, done *bool, mutexControllers *sync.Mutex, mut
 			mutexTurnsWorld.Unlock()
 			mutexControllers.Unlock()
 		} else {
+			ticker.Stop()
 			break
 		}
 		mutexDone.Unlock()
