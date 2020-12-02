@@ -8,6 +8,7 @@ import (
 	"strconv"
 )
 
+// Handles the engine by taking in its input and putting it into the messages channel
 func handleEngine(conn net.Conn, messages chan<- string) {
 	reader := bufio.NewReader(conn)
 	for {
@@ -102,6 +103,7 @@ func calcNextState(world [][]byte) [][]byte {
 	return nextWorld
 }
 
+// Sends a row in the world to the engine
 func sendRowToEngine(row []byte, engine net.Conn) {
 	writer := bufio.NewWriter(engine)
 	for _, element := range row {
@@ -110,6 +112,7 @@ func sendRowToEngine(row []byte, engine net.Conn) {
 	writer.Flush()
 }
 
+// Receives a row from the engine to be placed in the world
 func receiveRowFromEngine(width int, messages <-chan string) []byte {
 	var row []byte
 	for i := 0; i < width; i++ {
@@ -118,7 +121,7 @@ func receiveRowFromEngine(width int, messages <-chan string) []byte {
 	return row
 }
 
-// Returns the number of alive cells in a world
+// Returns the number of alive cells in part of a world
 func calcNumAliveCells(world [][]byte) int {
 	total := 0
 	for _, row := range world {
@@ -131,7 +134,8 @@ func calcNumAliveCells(world [][]byte) int {
 	return total
 }
 
-func sendWorldToEngine(engine net.Conn, world [][]byte) {
+// Sends part of the world to the engine
+func sendPartToEngine(engine net.Conn, world [][]byte) {
 	fmt.Println("Sending world to engine")
 	writer := bufio.NewWriter(engine)
 	for _, row := range world[1:len(world) - 1] {
@@ -142,11 +146,11 @@ func sendWorldToEngine(engine net.Conn, world [][]byte) {
 	writer.Flush()
 }
 
+// Receives part of a world to process and returns it to the engine once processed
 func main() {
 	addressPtr := flag.String("address_engine", "127.0.0.1:8040", "Specify the address of the GoL engine. Defaults to 127.0.0.1:8040.")
 	flag.Parse()
 	shutDown := false
-
 	engine, err := net.Dial("tcp", *addressPtr)
 	messages := make(chan string)
 	if err == nil {
@@ -155,11 +159,13 @@ func main() {
 		fmt.Printf("Error: no engine at address %s\n", *addressPtr)
 		shutDown = true // Means it will never go into the loop
 	}
-
-	for !shutDown {
-		heightString := <-messages
-		if heightString == "SHUT_DOWN\n" { // Because worker may not be used, so the first thing it could receive is a shut down message
+	for !shutDown { // This loops until a shutdown message is sent from the engine
+		firstMessage := <-messages
+		var heightString string
+		if firstMessage == "SHUT_DOWN\n" { // Worker may not be used, so the first thing it could receive is a shut down message
 			break
+		} else {
+			heightString = firstMessage
 		}
 		widthString := <-messages
 		height, width := netStringToInt(heightString), netStringToInt(widthString)
@@ -168,25 +174,18 @@ func main() {
 		fmt.Println("Received world")
 		for {
 			nextWorld := calcNextState(world)
-
-			// Report the number of alive cells to the engine
 			aliveCells := calcNumAliveCells(nextWorld)
-			aliveCellsString := strconv.Itoa(aliveCells) + "\n"
-			fmt.Fprintf(engine, aliveCellsString)
-
+			fmt.Fprintf(engine, "%d\n", aliveCells) // Report the number of alive cells to the engine
 			// Send the top row and bottom row to the controller
 			sendRowToEngine(nextWorld[0], engine)
 			sendRowToEngine(nextWorld[len(nextWorld) - 1], engine)
-
 			// Receive a new top row and bottom row from the controller
 			topRow := receiveRowFromEngine(width, messages)
 			bottomRow := receiveRowFromEngine(width, messages)
-
 			// Add the new top and bottom rows to the next world
 			world = [][]byte{topRow}
 			world = append(world, nextWorld...)
 			world = append(world, bottomRow)
-
 			status := <-messages
 			if status == "DONE\n" {
 				break
@@ -194,9 +193,9 @@ func main() {
 				shutDown = true
 				break
 			} else if status == "SEND_WORLD\n" {
-				sendWorldToEngine(engine, world)
+				sendPartToEngine(engine, world)
 			}
 		}
-		sendWorldToEngine(engine, world)
+		sendPartToEngine(engine, world)
 	}
 }

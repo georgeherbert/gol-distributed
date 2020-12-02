@@ -29,7 +29,6 @@ func sendWorld(height int, width int, ioInput <-chan uint8, conn net.Conn) {
 	writer := bufio.NewWriter(conn)
 	for i := 0; i < height * width; i++ {
 		writer.WriteString(fmt.Sprintf("%d\n", <-ioInput))
-		//fmt.Fprintf(conn, "%d\n", <-ioInput)
 	}
 	writer.Flush()
 }

@@ -256,52 +256,40 @@ func main() {
 	portControllerPtr := flag.String("port_controller", ":8030", "port to listen on for controllers")
 	portWorkerPtr := flag.String("port_worker", ":8040", "port to listen on")
 	flag.Parse()
-
-	//TODO: Maybe put this stuff in a function seeing as the two blocks are identical
-
-	// Controllers stuff
+	// Sets up connections and channel for the controller
 	lnController, _ := net.Listen("tcp", *portControllerPtr)
 	messagesController := make(chan string)
 	mutexControllers := &sync.Mutex{} // Used whenever sending data to client to stop multiple things being sent at once
 	controllers := new([]net.Conn)
 	go handleNewControllers(lnController, messagesController, mutexControllers, controllers)
-
-	// Workers stuff
+	// Sets up connections and channels for the workers
 	lnWorker, _ := net.Listen("tcp", *portWorkerPtr)
 	messagesWorker := new([]chan string)
 	mutexWorkers := &sync.Mutex{}
 	workers := new([]net.Conn)
 	go handleNewWorkers(lnWorker, messagesWorker, mutexWorkers, workers)
-
 	shutDown := false
 	for !shutDown {
 		if <-messagesController == "INITIALISE\n" { // This stops a new connection attempting to rejoin once all turns are complete breaking the engine
 			heightString, widthString, turnsString, threadsString := <-messagesController, <-messagesController, <-messagesController, <-messagesController
 			height, width, turns, threads := netStringToInt(heightString), netStringToInt(widthString), netStringToInt(turnsString), netStringToInt(threadsString)
-
 			mutexWorkers.Lock()
 			workersUsed := (*workers)[:threads]
 			mutexWorkers.Unlock()
-
 			done := false
 			completedTurns := 0
 			mutexDone := &sync.Mutex{}
 			mutexTurnsWorld := &sync.Mutex{}
-
 			world := initialiseWorld(height, width, messagesController)
-
 			if turns > 0 {     // If there are more than 0 turns, process them
 				fmt.Println("Received details")
-
 				mutexWorkers.Lock()
 				sectionHeights := calcSectionHeights(height, threads)
 				for i, worker := range workersUsed {
 					fmt.Fprintf(worker, "%d\n", sectionHeights[i])
 				}
 				sendToAll(workersUsed, widthString)
-
 				startYValues := calcStartYValues(sectionHeights)
-
 				for i := 0; i < threads; i++ {
 					startY := startYValues[i]
 					endY := startY + sectionHeights[i]
@@ -309,10 +297,8 @@ func main() {
 					sendPartToWorker(part, (*workers)[i])
 				}
 				mutexWorkers.Unlock()
-
 				numAliveCells := 0
 				go ticker(mutexDone, &done, mutexControllers, mutexTurnsWorld, &completedTurns, controllers, &numAliveCells)
-
 				pause := make(chan bool)
 				send := make(chan bool)
 				shutDownChan := make(chan bool)
@@ -344,7 +330,7 @@ func main() {
 					}
 
 					// Send the top and bottom rows to each worker
-					for i, _ := range rowsFromWorkers {
+					for i := range rowsFromWorkers {
 						workerAbove, workerBelow := i - 1, i + 1
 						if i == 0 {
 							workerAbove = len(rowsFromWorkers) - 1
@@ -355,7 +341,6 @@ func main() {
 						sendRowToWorker(rowsFromWorkers[workerAbove][1], (*workers)[i])
 						sendRowToWorker(rowsFromWorkers[workerBelow][0], (*workers)[i])
 					}
-
 					mutexWorkers.Lock()
 					select {
 					case <-send:
@@ -376,30 +361,19 @@ func main() {
 					mutexWorkers.Unlock()
 					mutexTurnsWorld.Unlock()
 				}
-
 				mutexTurnsWorld.Lock()
 				world = receiveWorldFromWorkers(height, sectionHeights, width, (*messagesWorker)[:threads])
 				mutexTurnsWorld.Unlock()
 			}
-
 			// Once it has done all the iterations, send a message to the controller to let it know it is done
 			mutexDone.Lock()
+			mutexControllers.Lock()
 			done = true
-			mutexControllers.Lock()
 			sendToAll(*controllers, "DONE\n")
-			mutexControllers.Unlock()
 			mutexDone.Unlock()
-
-			// Send the world back to the controller
-			mutexControllers.Lock()
-			for _, conn := range *controllers {
+			for _, conn := range *controllers { // Send the world back to all of the controllers
 				sendWorld(world, conn, completedTurns)
 			}
-			mutexControllers.Unlock()
-
-			fmt.Printf("Computed %d turns of %dx%d\n", completedTurns, height, width)
-
-			mutexControllers.Lock()
 			*controllers = (*controllers)[:0] // Clear the controllers once processing the current board is finished
 			mutexControllers.Unlock()
 		}
