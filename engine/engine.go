@@ -8,7 +8,6 @@ import (
 	"strconv"
 	"sync"
 	"time"
-	"math"
 )
 
 func handleConnection(conn net.Conn, messages chan<- string) {
@@ -105,6 +104,35 @@ func sendToAll(connections []net.Conn, value string) {
 	}
 }
 
+// Returns a slice containing the height of each section that each worker will process
+func calcSectionHeights(height int, threads int) []int {
+	heightOfParts := make([]int, threads)
+	for i := range heightOfParts{
+		heightOfParts[i] = 0
+	}
+	partAssigning := 0
+	for i := 0; i < height; i++ {
+		heightOfParts[partAssigning] += 1
+		if partAssigning == len(heightOfParts) - 1 {
+			partAssigning = 0
+		} else {
+			partAssigning += 1
+		}
+	}
+	return heightOfParts
+}
+
+// Returns a slice containing the initial y-values of the parts of the world that each worker will process
+func calcStartYValues(sectionHeights []int) []int {
+	startYValues := make([]int, len(sectionHeights))
+	totalHeightAssigned := 0
+	for i, height := range sectionHeights {
+		startYValues[i] = totalHeightAssigned
+		totalHeightAssigned += height
+	}
+	return startYValues
+}
+
 // Sends the number of alive cells every 2 seconds
 func ticker(mutexDone *sync.Mutex, done *bool, mutexControllers *sync.Mutex, mutexTurnsWorld *sync.Mutex,
 	completedTurns *int, controllers *[]net.Conn, numAliveCells *int) {
@@ -192,18 +220,11 @@ func receiveRowFromWorker(width int, messages <-chan string) []byte {
 	return row
 }
 
-func receiveWorldFromWorkers(height int, sectionHeight int, lastSectionHeight int, width int, messagesChannels []chan string) [][]byte {
+func receiveWorldFromWorkers(height int, sectionHeights []int, width int, messagesChannels []chan string) [][]byte {
 	world := make([][]byte, height)
-	rowsReceived := 0
-	for _, channel := range messagesChannels {
+	for i, channel := range messagesChannels {
 		var part [][]byte
-		var partHeight int
-		if lastSectionHeight != height - rowsReceived {
-			partHeight = sectionHeight
-		} else {
-			partHeight = lastSectionHeight
-		}
-		part = make([][]byte, partHeight)
+		part = make([][]byte, sectionHeights[i])
 		for y := range part {
 			part[y] = make([]byte, width)
 		}
@@ -215,7 +236,6 @@ func receiveWorldFromWorkers(height int, sectionHeight int, lastSectionHeight in
 			}
 		}
 		world = append(world, part...)
-		rowsReceived += partHeight
 	}
 	return world
 }
@@ -274,22 +294,17 @@ func main() {
 				fmt.Println("Received details")
 
 				mutexWorkers.Lock()
-				sectionHeight := height / threads
-				var lastSectionHeight int
-				if math.Mod(float64(height), float64(threads)) == 0 {
-					lastSectionHeight = sectionHeight
-				} else {
-					lastSectionHeight = height - ((threads - 1) * sectionHeight)
+				sectionHeights := calcSectionHeights(height, threads)
+				for i, worker := range workersUsed {
+					fmt.Fprintf(worker, "%d\n", sectionHeights[i])
 				}
-
-				sendToAll(workersUsed[:threads - 1], fmt.Sprintf("%d\n", sectionHeight))
-				fmt.Fprintf(workersUsed[threads - 1], "%d\n", lastSectionHeight)
-
 				sendToAll(workersUsed, widthString)
 
+				startYValues := calcStartYValues(sectionHeights)
+
 				for i := 0; i < threads; i++ {
-					startY := i * sectionHeight
-					endY := startY + sectionHeight
+					startY := startYValues[i]
+					endY := startY + sectionHeights[i]
 					part := getPart(world, threads, i, startY, endY)
 					sendPartToWorker(part, (*workers)[i])
 				}
@@ -345,7 +360,7 @@ func main() {
 					select {
 					case <-send:
 						sendToAll(workersUsed, "SEND_WORLD\n")
-						world = receiveWorldFromWorkers(height, sectionHeight, lastSectionHeight, width, (*messagesWorker)[:threads])
+						world = receiveWorldFromWorkers(height, sectionHeights, width, (*messagesWorker)[:threads])
 						send <- true
 					case <-shutDownChan:
 						turn = turns
@@ -363,7 +378,7 @@ func main() {
 				}
 
 				mutexTurnsWorld.Lock()
-				world = receiveWorldFromWorkers(height, sectionHeight, lastSectionHeight, width, (*messagesWorker)[:threads])
+				world = receiveWorldFromWorkers(height, sectionHeights, width, (*messagesWorker)[:threads])
 				mutexTurnsWorld.Unlock()
 			}
 

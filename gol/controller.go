@@ -51,6 +51,7 @@ func manageKeyPresses(keyPresses <-chan rune, quit chan<- bool, conn net.Conn) {
 	}
 }
 
+// Receives commands from the engine and responds appropriately
 func handleEngine(events chan<- Event, reader *bufio.Reader, done chan<- bool, imageHeight int, imageWidth int,
 	fileName string, ioCommand chan<- ioCommand, ioFileName chan<- string, ioOutput chan<- uint8, quit chan<- bool) {
 	for {
@@ -80,6 +81,7 @@ func handleEngine(events chan<- Event, reader *bufio.Reader, done chan<- bool, i
 	}
 }
 
+// Reports the number of alive cells
 func reportAliveCells(events chan<- Event, reader *bufio.Reader) {
 	turnsString, _ := reader.ReadString('\n')
 	aliveCellsString, _ := reader.ReadString('\n')
@@ -97,6 +99,7 @@ func netStringToInt(netString string) int {
 	return integer
 }
 
+// Receives the world and the number of completed turns from the engine and returns them
 func receiveWorld(height int, width int, reader *bufio.Reader) ([][]byte, int) {
 	completedTurnsString, _ := reader.ReadString('\n')
 	completedTurns := netStringToInt(completedTurnsString)
@@ -114,7 +117,7 @@ func receiveWorld(height int, width int, reader *bufio.Reader) ([][]byte, int) {
 	return world, completedTurns
 }
 
-// Returns a slice of alive cells
+// Given a world, returns a slice of the alive cells
 func getAliveCells(world [][]byte) []util.Cell {
 	var aliveCells []util.Cell
 	for y, row := range world {

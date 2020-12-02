@@ -156,8 +156,6 @@ func main() {
 		shutDown = true // Means it will never go into the loop
 	}
 
-
-
 	for !shutDown {
 		heightString := <-messages
 		if heightString == "SHUT_DOWN\n" { // Because worker may not be used, so the first thing it could receive is a shut down message
