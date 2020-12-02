@@ -250,14 +250,6 @@ func getNumAliveCells(messagesWorker *[]chan string, threads int) int {
 	return numAliveCells
 }
 
-func sendRowToWorker(row []byte, worker net.Conn) {
-	writer := bufio.NewWriter(worker)
-	for _, element := range row {
-		writer.WriteString(fmt.Sprintf("%d\n", int(element)))
-	}
-	writer.Flush()
-}
-
 func receiveRowFromWorker(width int, messages <-chan string) []byte {
 	var row []byte
 	for i := 0; i < width; i++ {
@@ -279,6 +271,30 @@ func getRowsFromWorkers(threads int, messagesWorker *[]chan string, width int) [
 	return rowsFromWorkersSlice
 }
 
+func sendRowToWorker(row []byte, worker net.Conn) {
+	writer := bufio.NewWriter(worker)
+	for _, element := range row {
+		writer.WriteString(fmt.Sprintf("%d\n", int(element)))
+	}
+	writer.Flush()
+}
+
+// Send the correct top and bottom rows to each worker
+func sendRowsToWorkers(rowsFromWorkersSlice []rowsFromWorkers, workersUsed []net.Conn) {
+	for i := range rowsFromWorkersSlice {
+		workerAbove, workerBelow := i - 1, i + 1
+		if i == 0 {
+			workerAbove = len(rowsFromWorkersSlice) - 1
+		}
+		if i == len(rowsFromWorkersSlice) - 1 {
+			workerBelow = 0
+		}
+		sendRowToWorker(rowsFromWorkersSlice[workerAbove].bottomRow, workersUsed[i])
+		sendRowToWorker(rowsFromWorkersSlice[workerBelow].topRow, workersUsed[i])
+	}
+}
+
+// Receive the top and bottom rows from each worker
 func receiveWorldFromWorkers(height int, sectionHeights []int, width int, messagesChannels []chan string) [][]byte {
 	world := make([][]byte, height)
 	for i, channel := range messagesChannels {
@@ -362,22 +378,8 @@ func main() {
 					mutexTurnsWorld.Lock()
 					numAliveCells = getNumAliveCells(messagesWorker, threads)
 					completedTurns = turn + 1
-
-					// Receive the top and bottom rows from each worker
 					rowsFromWorkersSlice := getRowsFromWorkers(threads, messagesWorker, width)
-
-					// Send the top and bottom rows to each worker
-					for i := range rowsFromWorkersSlice {
-						workerAbove, workerBelow := i - 1, i + 1
-						if i == 0 {
-							workerAbove = len(rowsFromWorkersSlice) - 1
-						}
-						if i == len(rowsFromWorkersSlice) - 1 {
-							workerBelow = 0
-						}
-						sendRowToWorker(rowsFromWorkersSlice[workerAbove].bottomRow, (*workers)[i])
-						sendRowToWorker(rowsFromWorkersSlice[workerBelow].topRow, (*workers)[i])
-					}
+					sendRowsToWorkers(rowsFromWorkersSlice, workersUsed)
 					mutexWorkers.Lock()
 					select {
 					case <-send:
