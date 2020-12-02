@@ -252,6 +252,7 @@ func sendWorld(world [][]byte, conn net.Conn, completedTurns int) {
 	writer.Flush()
 }
 
+// Divides the work between workers, interacts with them and interacts with other subroutines
 func main() {
 	portControllerPtr := flag.String("port_controller", ":8030", "port to listen on for controllers")
 	portWorkerPtr := flag.String("port_worker", ":8040", "port to listen on")

@@ -38,14 +38,15 @@ func sendWorld(height int, width int, ioInput <-chan uint8, conn net.Conn) {
 func manageKeyPresses(keyPresses <-chan rune, quit chan<- bool, conn net.Conn) {
 	for {
 		key := <-keyPresses
-		if key == 115 { // save
+		switch key {
+		case 115: // Save (S)
 			fmt.Fprintf(conn, "SAVE\n")
-		} else if key == 113 { // stop
+		case 113: // Quit (Q)
 			fmt.Fprintf(conn, "QUIT\n")
 			quit <- true
-		} else if key == 112 { // pause/resume
+		case 112: // Pause/Resume (P)
 			fmt.Fprintf(conn, "PAUSE\n")
-		} else if key == 107 { // shutdown
+		case 107: // Shut Down (K)
 			fmt.Fprintf(conn, "SHUT_DOWN\n")
 		}
 	}
@@ -54,30 +55,32 @@ func manageKeyPresses(keyPresses <-chan rune, quit chan<- bool, conn net.Conn) {
 // Receives commands from the engine and responds appropriately
 func handleEngine(events chan<- Event, reader *bufio.Reader, done chan<- bool, imageHeight int, imageWidth int,
 	fileName string, ioCommand chan<- ioCommand, ioFileName chan<- string, ioOutput chan<- uint8, quit chan<- bool) {
-	for {
-		operation, _ := reader.ReadString('\n')
-		if operation == "REPORT_ALIVE\n" {
-			reportAliveCells(events, reader)
-		} else if operation == "DONE\n" {
-			done <- true
-			break // Stops loop trying to receive inputs as would otherwise receive the cell values as inputs
-		} else if operation == "SENDING_WORLD\n" || operation == "SHUTTING_DOWN\n" {
-			world, completedTurns := receiveWorld(imageHeight, imageWidth, reader)
-			writeFile(world, fileName, completedTurns, ioCommand, ioFileName, ioOutput, events)
-			if operation == "SHUTTING_DOWN\n" {
-				quit <- true
+	CommandLoop:
+		for {
+			command, _ := reader.ReadString('\n')
+			switch command {
+			case "REPORT_ALIVE\n":
+				reportAliveCells(events, reader)
+			case "DONE\n":
+				done <- true
+				break CommandLoop // Stops loop trying to receive inputs as would otherwise receive the cell values as inputs
+			case "SENDING_WORLD\n", "SHUTTING_DOWN\n":
+				world, completedTurns := receiveWorld(imageHeight, imageWidth, reader)
+				writeFile(world, fileName, completedTurns, ioCommand, ioFileName, ioOutput, events)
+				if command == "SHUTTING_DOWN\n" {
+					quit <- true // Causes the controller to quit
+				}
+			case "PAUSING\n", "RESUMING\n":
+				completedTurnsString, _ := reader.ReadString('\n')
+				completedTurns := netStringToInt(completedTurnsString)
+				var newState State
+				if command == "PAUSING\n" {
+					newState = Paused
+				} else {
+					newState = Continuing
+				}
+				events <- StateChange{completedTurns, newState}
 			}
-		} else if operation == "PAUSING\n" || operation == "RESUMING\n" {
-			completedTurnsString, _ := reader.ReadString('\n')
-			completedTurns := netStringToInt(completedTurnsString)
-			var newState State
-			if operation == "PAUSING\n" {
-				newState = Paused
-			} else {
-				newState = Continuing
-			}
-			events <- StateChange{completedTurns, newState}
-		}
 	}
 }
 
@@ -141,48 +144,36 @@ func writeFile(world [][]byte, fileName string, turns int, ioCommand chan<- ioCo
 			ioOutputChannel <- element
 		}
 	}
-	events <- ImageOutputComplete{ // implements Event
+	events <- ImageOutputComplete{
 		CompletedTurns: turns,
 		Filename:       outputFileName,
 	}
 }
 
-// Distributor divides the work between workers and interacts with other goroutines.
+// Controller sends the world to the engine to be processed, receives it back and interacts with other subroutines
 func controller(p Params, c distributorChannels) {
 	if p.Engine == "" {
 		p.Engine = "127.0.0.1:8030"
 	}
-	// Dials the engine and establishes reader
-	conn, err := net.Dial("tcp", p.Engine)
-	if err == nil {
+	conn, err := net.Dial("tcp", p.Engine) // Dials the engine and establishes reader
+	if err == nil { // If there's no error it means the engine is active and can be connected to
 		reader := bufio.NewReader(conn)
-
-		//TODO: Make it so this doesn't have to be specified when reconnecting
 		fileName := strconv.Itoa(p.ImageWidth) + "x" + strconv.Itoa(p.ImageHeight)
-
 		if p.Rejoin == false {
 			fmt.Fprintf(conn, "INITIALISE\n")
-
 			sendFileName(fileName, c.ioCommand, c.ioFileName)
-
-			fmt.Fprintf(conn, "%d\n", p.ImageHeight) // Send image height to server
-			fmt.Fprintf(conn, "%d\n", p.ImageWidth)  // Send image width to server
-			fmt.Fprintf(conn, "%d\n", p.Turns)       // Send number of turns to server
-			fmt.Fprintf(conn, "%d\n", p.Threads)     // Send number of threads to server
-
+			// Send height, width, turns and threads to the server
+			fmt.Fprintf(conn, "%d\n%d\n%d\n%d\n", p.ImageHeight, p.ImageWidth, p.Turns, p.Threads)
 			sendWorld(p.ImageHeight, p.ImageWidth, c.ioInput, conn) // Send the world to the server
 		}
-
 		quit := make(chan bool)
+		done := make(chan bool) // Used to stop execution until the turns are done executing otherwise receiveWorld will start trying to receive
 		go manageKeyPresses(c.keyPresses, quit, conn)
-		done := make(chan bool)                                                                                                     // Used to stop execution until the turns are done executing otherwise receiveWorld will start trying to receive
-		go handleEngine(c.events, reader, done, p.ImageHeight, p.ImageWidth, fileName, c.ioCommand, c.ioFileName, c.ioOutput, quit) // Report the alive cells until the engine is done
+		go handleEngine(c.events, reader, done, p.ImageHeight, p.ImageWidth, fileName, c.ioCommand, c.ioFileName, c.ioOutput, quit)
 		select {
-		case <-done:
-			// Receives the world back from the server once all rounds are complete
+		case <-done: // Once all rounds are complete the code block below is executed
 			world, completedTurns := receiveWorld(p.ImageHeight, p.ImageWidth, reader)
 			fmt.Fprintf(conn, "DONE\n") // Sends this message back to the controller to let it know it has receives the message
-			// Once the final turn is complete
 			aliveCells := getAliveCells(world)
 			c.events <- FinalTurnComplete{
 				CompletedTurns: completedTurns,
@@ -192,7 +183,7 @@ func controller(p Params, c distributorChannels) {
 			c.ioCommand <- ioCheckIdle // Make sure that the Io has finished any output before exiting.
 			<-c.ioIdle
 			c.events <- StateChange{completedTurns, Quitting}
-		case <-quit:
+		case <-quit: // If the controller quits, this stops the code block above executing
 		}
 	} else {
 		fmt.Printf("Error: no engine at address %s\n", p.Engine)
