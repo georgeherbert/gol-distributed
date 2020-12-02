@@ -79,6 +79,7 @@ func netStringToInt(netString string) int {
 	return integer
 }
 
+// Gets details about the world from the controller and returns them
 func getDetails(messagesController <-chan string) (int, int, int, int) {
 	heightString := <-messagesController
 	widthString := <-messagesController
@@ -252,6 +253,7 @@ func handleKeyPresses(messagesController <-chan string, mutexControllers *sync.M
 		}
 }
 
+// Gets the number of alive cells from each worker and returns the sum
 func getNumAliveCells(messagesWorker *[]chan string, threads int) int {
 	numAliveCells := 0
 	for _, channel := range (*messagesWorker)[:threads] {
@@ -262,6 +264,7 @@ func getNumAliveCells(messagesWorker *[]chan string, threads int) int {
 	return numAliveCells
 }
 
+// Receives a row from a worker and returns it
 func receiveRowFromWorker(width int, messages <-chan string) []byte {
 	var row []byte
 	for i := 0; i < width; i++ {
@@ -270,6 +273,7 @@ func receiveRowFromWorker(width int, messages <-chan string) []byte {
 	return row
 }
 
+// Gets all of the top and bottom rows from the workers and returns a slice of them
 func getRowsFromWorkers(threads int, messagesWorker *[]chan string, width int) []rowsFromWorkers {
 	var rowsFromWorkersSlice []rowsFromWorkers
 	for _, workerChan := range (*messagesWorker)[:threads] {
@@ -283,6 +287,7 @@ func getRowsFromWorkers(threads int, messagesWorker *[]chan string, width int) [
 	return rowsFromWorkersSlice
 }
 
+// Sends a row to a worker
 func sendRowToWorker(row []byte, worker net.Conn) {
 	writer := bufio.NewWriter(worker)
 	for _, element := range row {
@@ -327,6 +332,7 @@ func receiveWorldFromWorkers(height int, sectionHeights []int, width int, messag
 	return world
 }
 
+// Works out what command needs to be sent to the workers
 func sendCommandToWorkers(send chan bool, workersUsed []net.Conn, height int, sectionHeights []int, width int,
 	messagesWorker *[]chan string, threads int, world *[][]byte, shutDownChan chan bool, turn *int, turns int,
 	workers *[]net.Conn, shutDown *bool, completedTurns int) {
@@ -348,6 +354,7 @@ func sendCommandToWorkers(send chan bool, workersUsed []net.Conn, height int, se
 	}
 }
 
+// Performs the specified number of turns of the world
 func performAllTurns(turns int, pause <-chan bool, mutexTurnsWorld *sync.Mutex, numAliveCells *int,
 	messagesWorker *[]chan string, threads int, completedTurns *int, width int, workersUsed []net.Conn,
 	mutexWorkers *sync.Mutex, send chan bool, height int, sectionHeights []int, world *[][]byte,
