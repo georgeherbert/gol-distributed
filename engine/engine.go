@@ -10,6 +10,7 @@ import (
 	"time"
 )
 
+// Handles connections by taking in their input and putting it into the messages channel
 func handleConnection(conn net.Conn, messages chan<- string) {
 	reader := bufio.NewReader(conn)
 	for {
@@ -21,6 +22,7 @@ func handleConnection(conn net.Conn, messages chan<- string) {
 	}
 }
 
+// Handles controllers joining by adding them to the slice of controllers and passing them to the handleConnections function
 func handleNewControllers(ln net.Listener, messages chan<- string, mutex *sync.Mutex, connections *[]net.Conn) {
 	for {
 		connection, _ := ln.Accept()
@@ -32,6 +34,7 @@ func handleNewControllers(ln net.Listener, messages chan<- string, mutex *sync.M
 	}
 }
 
+// Handles workers joining by adding them to the slice of workers and passing them to the handleConnections function
 func handleNewWorkers(ln net.Listener, messagesSlice *[]chan string, mutex *sync.Mutex, connections *[]net.Conn) {
 	for {
 		connection, _ := ln.Accept()
@@ -55,13 +58,13 @@ func netStringToInt(netString string) int {
 func initialiseWorld(height int, width int, messages <-chan string) [][]byte {
 	world := make([][]byte, height)
 	for y := range world {
-		world[y] = make([]byte, width)
+		world[y] = make([]byte, width) // Create an array of bytes for each row
 	}
 	for y, row := range world {
 		for x := range row {
 			msg, _ := <-messages
 			cell := netStringToInt(msg)
-			world[y][x] = byte(cell)
+			world[y][x] = byte(cell) // Add each cell to the row
 		}
 	}
 	return world
@@ -70,15 +73,15 @@ func initialiseWorld(height int, width int, messages <-chan string) [][]byte {
 // Returns part of a world given the number of threads, the part number, the startY, and the endY
 func getPart(world [][]byte, threads int, partNum int, startY int, endY int) [][]byte {
 	var worldPart [][]byte
-	if threads == 1 {
+	if threads == 1 { // Having 1 thread is a special case as the top and bottom row will come from the same part
 		worldPart = append(worldPart, world[len(world) - 1])
 		worldPart = append(worldPart, world...)
 		worldPart = append(worldPart, world[0])
 	} else {
-		if partNum == 0 {
+		if partNum == 0 { // If it is the first part add the bottom row of the world as the top row
 			worldPart = append(worldPart, world[len(world)-1])
 			worldPart = append(worldPart, world[:endY + 1]...)
-		} else if partNum == threads - 1 {
+		} else if partNum == threads - 1 { // If it is the last part add the top row of the world as the bottom row
 			worldPart = append(worldPart, world[startY - 1:]...)
 			worldPart = append(worldPart, world[0])
 		} else {
@@ -88,6 +91,7 @@ func getPart(world [][]byte, threads int, partNum int, startY int, endY int) [][
 	return worldPart
 }
 
+// Sends a given part of the world to a worker
 func sendPartToWorker(part [][]byte, worker net.Conn) {
 	writer := bufio.NewWriter(worker)
 	for _, row := range part {
@@ -98,6 +102,7 @@ func sendPartToWorker(part [][]byte, worker net.Conn) {
 	writer.Flush()
 }
 
+// Sends a message to every connection in the provided slice of connections
 func sendToAll(connections []net.Conn, value string) {
 	for _, conn := range connections {
 		fmt.Fprintf(conn, value)
@@ -137,71 +142,65 @@ func calcStartYValues(sectionHeights []int) []int {
 func ticker(mutexDone *sync.Mutex, done *bool, mutexControllers *sync.Mutex, mutexTurnsWorld *sync.Mutex,
 	completedTurns *int, controllers *[]net.Conn, numAliveCells *int) {
 	ticker := time.NewTicker(2 * time.Second)
-	go func() {
-		for {
-			<-ticker.C
-			mutexDone.Lock()
-			if !*done {
-				mutexControllers.Lock()
-				mutexTurnsWorld.Lock()
-				fmt.Printf("%d Turns Completed\n", *completedTurns)
-				sendToAll(*controllers, "REPORT_ALIVE\n")
-				sendToAll(*controllers, fmt.Sprintf("%d\n", *completedTurns))
-				sendToAll(*controllers, fmt.Sprintf("%d\n", *numAliveCells))
-				mutexTurnsWorld.Unlock()
-				mutexControllers.Unlock()
-			} else {
-				break
-			}
-			mutexDone.Unlock()
+	for {
+		<-ticker.C
+		mutexDone.Lock()
+		if !*done {
+			mutexControllers.Lock()
+			mutexTurnsWorld.Lock()
+			fmt.Printf("%d Turns Completed\n", *completedTurns)
+			sendToAll(*controllers, fmt.Sprintf("REPORT_ALIVE\n%d\n%d\n", *completedTurns, *numAliveCells))
+			mutexTurnsWorld.Unlock()
+			mutexControllers.Unlock()
+		} else {
+			break
 		}
-	}()
+		mutexDone.Unlock()
+	}
 }
 
 // Received key presses from the controller and processes them
 func handleKeyPresses(messagesController <-chan string, mutexControllers *sync.Mutex, mutexTurnsWorld *sync.Mutex,
 	controllers *[]net.Conn, world *[][]byte, completedTurns *int, pause chan<- bool, send chan bool, shutDown chan bool) {
 	paused := false
-	for {
-		action := <-messagesController
-		if action == "PAUSE\n" {
-			pause <- true
-			mutexControllers.Lock()
-			mutexTurnsWorld.Lock()
-			if paused {
-				sendToAll(*controllers, "RESUMING\n")
-			} else {
-				sendToAll(*controllers, "PAUSING\n")
-			}
-			paused = !paused
-			sendToAll(*controllers, fmt.Sprintf("%d\n", *completedTurns))
-			mutexTurnsWorld.Unlock()
-			mutexControllers.Unlock()
-			fmt.Println("Paused/Resumed")
-		}
-		if !paused {
-			if action == "SAVE\n" {
-				send <- true
-				<-send // Once ready to send, a value will be sent back in this channel
+	ActionsLoop:
+		for {
+			action := <-messagesController
+			if action == "PAUSE\n" {
+				pause <- true
 				mutexControllers.Lock()
 				mutexTurnsWorld.Lock()
-				for _, conn := range *controllers {
-					fmt.Fprintf(conn, "SENDING_WORLD\n")
-					sendWorld(*world, conn, *completedTurns)
+				if paused {
+					sendToAll(*controllers, "RESUMING\n")
+				} else {
+					sendToAll(*controllers, "PAUSING\n")
 				}
+				sendToAll(*controllers, fmt.Sprintf("%d\n", *completedTurns))
+				paused = !paused
 				mutexTurnsWorld.Unlock()
 				mutexControllers.Unlock()
-				fmt.Println("Sent World")
-			} else if action == "SHUT_DOWN\n" {
-				shutDown <- true
-
-			} else if action == "QUIT\n" {
-				fmt.Println("A controller has quit")
-			}  else if action == "DONE\n" {
-				break
+				fmt.Println("Paused/Resumed")
+			} else if !paused {
+				switch action {
+				case "SAVE\n":
+					send <- true
+					<-send // Once ready to send, a value will be sent back in this channel
+					mutexControllers.Lock()
+					mutexTurnsWorld.Lock()
+					for _, conn := range *controllers {
+						fmt.Fprintf(conn, "SENDING_WORLD\n")
+						sendWorld(*world, conn, *completedTurns)
+					}
+					mutexTurnsWorld.Unlock()
+					mutexControllers.Unlock()
+					fmt.Println("Sent World")
+				case "SHUT_DOWN\n":
+					shutDown <- true
+				case "DONE\n":
+					break ActionsLoop
+				}
 			}
 		}
-	}
 }
 
 func sendRowToWorker(row []byte, worker net.Conn) {

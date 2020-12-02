@@ -42,7 +42,6 @@ func manageKeyPresses(keyPresses <-chan rune, quit chan<- bool, conn net.Conn) {
 		case 115: // Save (S)
 			fmt.Fprintf(conn, "SAVE\n")
 		case 113: // Quit (Q)
-			fmt.Fprintf(conn, "QUIT\n")
 			quit <- true
 		case 112: // Pause/Resume (P)
 			fmt.Fprintf(conn, "PAUSE\n")
