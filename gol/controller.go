@@ -146,6 +146,9 @@ func writeFile(world [][]byte, fileName string, turns int, ioCommand chan<- ioCo
 
 // Distributor divides the work between workers and interacts with other goroutines.
 func controller(p Params, c distributorChannels) {
+	if p.Engine == "" {
+		p.Engine = "127.0.0.1:8030"
+	}
 	// Dials the engine and establishes reader
 	conn, err := net.Dial("tcp", p.Engine)
 	if err == nil {

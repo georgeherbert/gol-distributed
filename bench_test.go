@@ -21,21 +21,21 @@ func benchmarkGol (threads int, b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			events := make(chan gol.Event, 1000)
 			b.StartTimer()
-			done := gol.Run(params, events, nil)
-			if done {}
+			gol.Run(params, events, nil)
+			for range events {}
 			b.StopTimer()
 		}
 	})
 }
 
-func BenchmarkThreads1(b *testing.B) { benchmarkGol(1, b) }
-func BenchmarkThreads2(b *testing.B) { benchmarkGol(2, b) }
-func BenchmarkThreads3(b *testing.B) { benchmarkGol(3, b) }
-func BenchmarkThreads4(b *testing.B) { benchmarkGol(4, b) }
-func BenchmarkThreads5(b *testing.B) { benchmarkGol(5, b) }
-func BenchmarkThreads6(b *testing.B) { benchmarkGol(6, b) }
-func BenchmarkThreads7(b *testing.B) { benchmarkGol(7, b) }
-func BenchmarkThreads8(b *testing.B) { benchmarkGol(8, b) }
+//func BenchmarkThreads1(b *testing.B) { benchmarkGol(1, b) }
+//func BenchmarkThreads2(b *testing.B) { benchmarkGol(2, b) }
+//func BenchmarkThreads3(b *testing.B) { benchmarkGol(3, b) }
+//func BenchmarkThreads4(b *testing.B) { benchmarkGol(4, b) }
+//func BenchmarkThreads5(b *testing.B) { benchmarkGol(5, b) }
+//func BenchmarkThreads6(b *testing.B) { benchmarkGol(6, b) }
+//func BenchmarkThreads7(b *testing.B) { benchmarkGol(7, b) }
+//func BenchmarkThreads8(b *testing.B) { benchmarkGol(8, b) }
 //func BenchmarkThreads9(b *testing.B) { benchmarkGol(9, b) }
 //func BenchmarkThreads10(b *testing.B) { benchmarkGol(10, b) }
 //func BenchmarkThreads11(b *testing.B) { benchmarkGol(11, b) }
