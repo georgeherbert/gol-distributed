@@ -10,6 +10,11 @@ import (
 	"time"
 )
 
+type rowsFromWorkers struct {
+	topRow []byte
+	bottomRow []byte
+}
+
 // Handles connections by taking in their input and putting it into the messages channel
 func handleConnection(conn net.Conn, messages chan<- string) {
 	reader := bufio.NewReader(conn)
@@ -261,6 +266,19 @@ func receiveRowFromWorker(width int, messages <-chan string) []byte {
 	return row
 }
 
+func getRowsFromWorkers(threads int, messagesWorker *[]chan string, width int) []rowsFromWorkers {
+	var rowsFromWorkersSlice []rowsFromWorkers
+	for _, workerChan := range (*messagesWorker)[:threads] {
+		topRow := receiveRowFromWorker(width, workerChan)
+		bottomRow := receiveRowFromWorker(width, workerChan)
+		rowsFromWorkersSlice = append(rowsFromWorkersSlice, rowsFromWorkers {
+			topRow: topRow,
+			bottomRow: bottomRow,
+		})
+	}
+	return rowsFromWorkersSlice
+}
+
 func receiveWorldFromWorkers(height int, sectionHeights []int, width int, messagesChannels []chan string) [][]byte {
 	world := make([][]byte, height)
 	for i, channel := range messagesChannels {
@@ -335,7 +353,6 @@ func main() {
 				shutDownChan := make(chan bool)
 				go handleKeyPresses(messagesController, mutexControllers, mutexTurnsWorld, controllers, &world,
 					&completedTurns, pause, send, shutDownChan)
-
 				for turn := 0; turn < turns; turn++ {
 					select {
 					case <-pause:
@@ -347,25 +364,19 @@ func main() {
 					completedTurns = turn + 1
 
 					// Receive the top and bottom rows from each worker
-					rowsFromWorkers := make([][][]byte, threads)
-					for i, workerChan := range (*messagesWorker)[:threads] {
-						topRow := receiveRowFromWorker(width, workerChan)
-						rowsFromWorkers[i] = append(rowsFromWorkers[i], topRow)
-						bottomRow := receiveRowFromWorker(width, workerChan)
-						rowsFromWorkers[i] = append(rowsFromWorkers[i], bottomRow)
-					}
+					rowsFromWorkersSlice := getRowsFromWorkers(threads, messagesWorker, width)
 
 					// Send the top and bottom rows to each worker
-					for i := range rowsFromWorkers {
+					for i := range rowsFromWorkersSlice {
 						workerAbove, workerBelow := i - 1, i + 1
 						if i == 0 {
-							workerAbove = len(rowsFromWorkers) - 1
+							workerAbove = len(rowsFromWorkersSlice) - 1
 						}
-						if i == len(rowsFromWorkers) - 1 {
+						if i == len(rowsFromWorkersSlice) - 1 {
 							workerBelow = 0
 						}
-						sendRowToWorker(rowsFromWorkers[workerAbove][1], (*workers)[i])
-						sendRowToWorker(rowsFromWorkers[workerBelow][0], (*workers)[i])
+						sendRowToWorker(rowsFromWorkersSlice[workerAbove].bottomRow, (*workers)[i])
+						sendRowToWorker(rowsFromWorkersSlice[workerBelow].topRow, (*workers)[i])
 					}
 					mutexWorkers.Lock()
 					select {
