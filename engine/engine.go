@@ -235,6 +235,16 @@ func handleKeyPresses(messagesController <-chan string, mutexControllers *sync.M
 		}
 }
 
+func getNumAliveCells(messagesWorker *[]chan string, threads int) int {
+	numAliveCells := 0
+	for _, channel := range (*messagesWorker)[:threads] {
+		numAliveCellsPartString := <-channel
+		numAliveCellsPart := netStringToInt(numAliveCellsPartString)
+		numAliveCells += numAliveCellsPart
+	}
+	return numAliveCells
+}
+
 func sendRowToWorker(row []byte, worker net.Conn) {
 	writer := bufio.NewWriter(worker)
 	for _, element := range row {
@@ -330,15 +340,10 @@ func main() {
 					select {
 					case <-pause:
 						<-pause
-					default:
+					default: // If the controller has not requested a pause just move onto performing the next turn of the world
 					}
 					mutexTurnsWorld.Lock()
-					numAliveCells = 0
-					for _, channel := range (*messagesWorker)[:threads] {
-						numAliveCellsPartString := <-channel
-						numAliveCellsPart := netStringToInt(numAliveCellsPartString)
-						numAliveCells += numAliveCellsPart
-					}
+					numAliveCells = getNumAliveCells(messagesWorker, threads)
 					completedTurns = turn + 1
 
 					// Receive the top and bottom rows from each worker
