@@ -15,12 +15,30 @@ type rowsFromWorkers struct {
 	bottomRow []byte
 }
 
+// Removes a given connection and its corresponding messages channel from slices
+func removeConnection(connection net.Conn, connectionSlice *[]net.Conn, messagesSlice *[]chan string) {
+	index := 0
+	for i, conn := range *connectionSlice {
+		if connection == conn {
+			index = i
+		}
+	}
+	*connectionSlice = append((*connectionSlice)[:index], (*connectionSlice)[index + 1:]...)
+	if len(*messagesSlice) > 0 {
+		*messagesSlice = append((*messagesSlice)[:index], (*messagesSlice)[index + 1:]...)
+	}
+}
+
 // Handles connections by taking in their input and putting it into the messages channel
-func handleConnection(conn net.Conn, messages chan<- string) {
+func handleConnection(conn net.Conn, messages chan<- string, connections *[]net.Conn, mutex *sync.Mutex,
+	messagesSlice *[]chan string) {
 	reader := bufio.NewReader(conn)
 	for {
 		msg, err := reader.ReadString('\n')
 		if err != nil { // EOF
+			mutex.Lock()
+			removeConnection(conn, connections, messagesSlice)
+			mutex.Unlock()
 			break
 		}
 		messages <- msg
@@ -31,11 +49,12 @@ func handleConnection(conn net.Conn, messages chan<- string) {
 func handleNewControllers(ln net.Listener, messages chan<- string, mutex *sync.Mutex, connections *[]net.Conn) {
 	for {
 		connection, _ := ln.Accept()
-		fmt.Println("New connection")
-		go handleConnection(connection, messages)
 		mutex.Lock()
 		*connections = append(*connections, connection)
 		mutex.Unlock()
+		messagesSlice := new([]chan string)
+		go handleConnection(connection, messages, connections, mutex, messagesSlice)
+		fmt.Println("New connection")
 	}
 }
 
@@ -53,13 +72,13 @@ func setUpControllers(portControllerPtr *string) (chan string, *sync.Mutex, *[]n
 func handleNewWorkers(ln net.Listener, messagesSlice *[]chan string, mutex *sync.Mutex, connections *[]net.Conn) {
 	for {
 		connection, _ := ln.Accept()
-		fmt.Println("New connection")
-		messages := make(chan string)
-		*messagesSlice = append(*messagesSlice, messages)
-		go handleConnection(connection, messages)
 		mutex.Lock()
 		*connections = append(*connections, connection)
 		mutex.Unlock()
+		messages := make(chan string)
+		*messagesSlice = append(*messagesSlice, messages)
+		go handleConnection(connection, messages, connections, mutex, messagesSlice)
+		fmt.Println("New connection")
 	}
 }
 
@@ -400,6 +419,8 @@ func main() {
 		height, width, turns, threads := getDetails(messagesController)
 		mutexWorkers.Lock()
 		workersUsed := (*workers)[:threads]
+		fmt.Println(workers)
+		fmt.Println(controllers)
 		mutexWorkers.Unlock()
 		done := false
 		completedTurns := 0
@@ -445,7 +466,6 @@ func main() {
 		for _, conn := range *controllers { // Send the world back to all of the controllers
 			sendWorld(world, conn, completedTurns)
 		}
-		*controllers = (*controllers)[:0] // Clear the controllers once processing the current board is finished
 		mutexControllers.Unlock()
 	}
 	sendToAll(*controllers, "SHUTTING_DOWN\n")
