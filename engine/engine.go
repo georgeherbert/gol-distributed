@@ -16,20 +16,21 @@ type rowsFromWorkers struct {
 }
 
 // Removes a given connection and its corresponding messages channel from slices
-func removeConnection(connection net.Conn, connectionSlice *[]net.Conn, messagesSlice *[]chan string) {
-	index := -1
+func removeConnection(connectionToRemove net.Conn, connectionSlice *[]net.Conn, messagesSlice *[]chan string) {
+	removeIndex := -1
 	for i, conn := range *connectionSlice {
-		if connection == conn {
-			index = i
+		if connectionToRemove == conn {
+			removeIndex = i
 		}
 	}
-	if index != -1 {
+	if removeIndex != -1 { // Connection may have been removed already in which case index will be -1 still
 		if len(*connectionSlice) > 0 {
-			*connectionSlice = append((*connectionSlice)[:index], (*connectionSlice)[index+1:]...)
+			*connectionSlice = append((*connectionSlice)[:removeIndex], (*connectionSlice)[removeIndex+1:]...)
 		}
 		if len(*messagesSlice) > 0 {
-			*messagesSlice = append((*messagesSlice)[:index], (*messagesSlice)[index+1:]...)
+			*messagesSlice = append((*messagesSlice)[:removeIndex], (*messagesSlice)[removeIndex+1:]...)
 		}
+		fmt.Println("Removed a connection")
 	}
 }
 
@@ -50,15 +51,15 @@ func handleConnection(conn net.Conn, messages chan<- string, connections *[]net.
 }
 
 // Handles controllers joining by adding them to the slice of controllers and passing them to the handleConnections function
-func handleNewControllers(ln net.Listener, messages chan<- string, mutex *sync.Mutex, connections *[]net.Conn) {
+func handleNewControllers(ln net.Listener, messagesController chan<- string, mutexControllers *sync.Mutex, controllers *[]net.Conn) {
 	for {
-		connection, _ := ln.Accept()
-		mutex.Lock()
-		*connections = append(*connections, connection)
-		mutex.Unlock()
-		messagesSlice := new([]chan string)
-		go handleConnection(connection, messages, connections, mutex, messagesSlice)
-		fmt.Println("New connection")
+		newController, _ := ln.Accept()
+		mutexControllers.Lock()
+		*controllers = append(*controllers, newController)
+		mutexControllers.Unlock()
+		notUsed := new([]chan string) // This will not be used
+		go handleConnection(newController, messagesController, controllers, mutexControllers, notUsed)
+		fmt.Println("New controller")
 	}
 }
 
@@ -73,16 +74,16 @@ func setUpControllers(portControllerPtr *string) (chan string, *sync.Mutex, *[]n
 }
 
 // Handles workers joining by adding them to the slice of workers and passing them to the handleConnections function
-func handleNewWorkers(ln net.Listener, messagesSlice *[]chan string, mutex *sync.Mutex, connections *[]net.Conn) {
+func handleNewWorkers(ln net.Listener, messagesWorkersSlice *[]chan string, mutexWorkers *sync.Mutex, workers *[]net.Conn) {
 	for {
-		connection, _ := ln.Accept()
-		mutex.Lock()
-		*connections = append(*connections, connection)
-		mutex.Unlock()
-		messages := make(chan string)
-		*messagesSlice = append(*messagesSlice, messages)
-		go handleConnection(connection, messages, connections, mutex, messagesSlice)
-		fmt.Println("New connection")
+		newWorker, _ := ln.Accept()
+		mutexWorkers.Lock()
+		*workers = append(*workers, newWorker)
+		mutexWorkers.Unlock()
+		messagesWorker := make(chan string)
+		*messagesWorkersSlice = append(*messagesWorkersSlice, messagesWorker)
+		go handleConnection(newWorker, messagesWorker, workers, mutexWorkers, messagesWorkersSlice)
+		fmt.Println("New worker")
 	}
 }
 
@@ -98,7 +99,7 @@ func setUpWorkers(portWorkerPtr *string) (*[]chan string, *sync.Mutex, *[]net.Co
 
 // Converts a string receives over tcp to an integer
 func netStringToInt(netString string) int {
-	integer, _ := strconv.Atoi(netString[:len(netString)-1])
+	integer, _ := strconv.Atoi(netString[:len(netString) - 1])
 	return integer
 }
 
@@ -115,9 +116,9 @@ func getDetails(messagesController <-chan string) (int, int, int, int) {
 	return height, width, turns, threads
 }
 
-// Initialises the world, getting the values from the server (only used if there are 0 turns)
-func initialiseWorld(height int, width int, messages <-chan string) [][]byte {
-	data := <-messages
+// Initialises the world, getting the values from the controller (only used if there are 0 turns)
+func initialiseWorld(height int, width int, messagesController <-chan string) [][]byte {
+	data := <-messagesController
 	world := make([][]byte, height)
 	for y := range world {
 		world[y] = make([]byte, width) // Create an array of bytes for each row
@@ -281,9 +282,9 @@ func handleKeyPresses(messagesController <-chan string, mutexControllers *sync.M
 }
 
 // Gets the number of alive cells from each worker and returns the sum
-func getNumAliveCells(messagesWorker *[]chan string, threads int) int {
+func getNumAliveCells(messagesWorkers *[]chan string, threads int) int {
 	numAliveCells := 0
-	for _, channel := range (*messagesWorker)[:threads] {
+	for _, channel := range (*messagesWorkers)[:threads] {
 		numAliveCellsPartString := <-channel
 		numAliveCellsPart := netStringToInt(numAliveCellsPartString)
 		numAliveCells += numAliveCellsPart
@@ -292,8 +293,8 @@ func getNumAliveCells(messagesWorker *[]chan string, threads int) int {
 }
 
 // Receives a row from a worker and returns it
-func receiveRowFromWorker(width int, messages <-chan string) []byte {
-	data := <-messages
+func receiveRowFromWorker(width int, messagesWorker <-chan string) []byte {
+	data := <-messagesWorker
 	var row []byte
 	for i := 0; i < width; i++ {
 		row = append(row, data[i])
@@ -302,9 +303,9 @@ func receiveRowFromWorker(width int, messages <-chan string) []byte {
 }
 
 // Gets all of the top and bottom rows from the workers and returns a slice of them
-func getRowsFromWorkers(threads int, messagesWorker *[]chan string, width int) []rowsFromWorkers {
+func getRowsFromWorkers(threads int, messagesWorkers *[]chan string, width int) []rowsFromWorkers {
 	var rowsFromWorkersSlice []rowsFromWorkers
-	for _, workerChan := range (*messagesWorker)[:threads] {
+	for _, workerChan := range (*messagesWorkers)[:threads] {
 		topRow := receiveRowFromWorker(width, workerChan)
 		bottomRow := receiveRowFromWorker(width, workerChan)
 		rowsFromWorkersSlice = append(rowsFromWorkersSlice, rowsFromWorkers {
@@ -364,12 +365,12 @@ func receiveWorldFromWorkers(height int, sectionHeights []int, width int, messag
 
 // Works out what command needs to be sent to the workers
 func sendCommandToWorkers(send chan bool, workersUsed []net.Conn, height int, sectionHeights []int, width int,
-	messagesWorker *[]chan string, threads int, world *[][]byte, shutDownChan chan bool, turn *int, turns int,
+	messagesWorkers *[]chan string, threads int, world *[][]byte, shutDownChan chan bool, turn *int, turns int,
 	workers *[]net.Conn, shutDown *bool, completedTurns int) {
 	select {
 	case <-send:
 		sendToAll(workersUsed, "SEND_WORLD\n")
-		*world = receiveWorldFromWorkers(height, sectionHeights, width, (*messagesWorker)[:threads])
+		*world = receiveWorldFromWorkers(height, sectionHeights, width, (*messagesWorkers)[:threads])
 		send <- true
 	case <-shutDownChan:
 		*turn = turns
@@ -386,7 +387,7 @@ func sendCommandToWorkers(send chan bool, workersUsed []net.Conn, height int, se
 
 // Performs the specified number of turns of the world
 func performAllTurns(turns int, pause <-chan bool, mutexTurnsWorld *sync.Mutex, numAliveCells *int,
-	messagesWorker *[]chan string, threads int, completedTurns *int, width int, workersUsed []net.Conn,
+	messagesWorkers *[]chan string, threads int, completedTurns *int, width int, workersUsed []net.Conn,
 	mutexWorkers *sync.Mutex, send chan bool, height int, sectionHeights []int, world *[][]byte,
 	shutDownChan chan bool, workers *[]net.Conn, shutDown *bool) {
 	for turn := 0; turn < turns; turn++ {
@@ -396,12 +397,12 @@ func performAllTurns(turns int, pause <-chan bool, mutexTurnsWorld *sync.Mutex, 
 		default: // If the controller has not requested a pause just move onto performing the next turn of the world
 		}
 		mutexTurnsWorld.Lock()
-		*numAliveCells = getNumAliveCells(messagesWorker, threads)
+		*numAliveCells = getNumAliveCells(messagesWorkers, threads)
 		*completedTurns = turn + 1
-		rowsFromWorkersSlice := getRowsFromWorkers(threads, messagesWorker, width)
+		rowsFromWorkersSlice := getRowsFromWorkers(threads, messagesWorkers, width)
 		sendRowsToWorkers(rowsFromWorkersSlice, workersUsed)
 		mutexWorkers.Lock()
-		sendCommandToWorkers(send, workersUsed, height, sectionHeights, width, messagesWorker, threads,
+		sendCommandToWorkers(send, workersUsed, height, sectionHeights, width, messagesWorkers, threads,
 			world, shutDownChan, &turn, turns, workers, shutDown, *completedTurns)
 		mutexWorkers.Unlock()
 		mutexTurnsWorld.Unlock()
@@ -414,7 +415,7 @@ func main() {
 	portWorkerPtr := flag.String("port_worker", ":8040", "port to listen on")
 	flag.Parse()
 	messagesController, mutexControllers, controllers := setUpControllers(portControllerPtr)
-	messagesWorker, mutexWorkers, workers := setUpWorkers(portWorkerPtr)
+	messagesWorkers, mutexWorkers, workers := setUpWorkers(portWorkerPtr)
 	shutDown := false
 	for !shutDown {
 		if <-messagesController != "INITIALISE\n" {
@@ -452,11 +453,11 @@ func main() {
 			shutDownChan := make(chan bool)
 			go handleKeyPresses(messagesController, mutexControllers, mutexTurnsWorld, controllers, &world,
 				&completedTurns, pause, send, shutDownChan)
-			performAllTurns(turns, pause, mutexTurnsWorld, &numAliveCells, messagesWorker, threads, &completedTurns,
+			performAllTurns(turns, pause, mutexTurnsWorld, &numAliveCells, messagesWorkers, threads, &completedTurns,
 				width, workersUsed, mutexWorkers, send, height, sectionHeights, &world, shutDownChan,
 				workers, &shutDown)
 			mutexTurnsWorld.Lock()
-			world = receiveWorldFromWorkers(height, sectionHeights, width, (*messagesWorker)[:threads])
+			world = receiveWorldFromWorkers(height, sectionHeights, width, (*messagesWorkers)[:threads])
 			mutexTurnsWorld.Unlock()
 		}
 		// Once it has done all the iterations, send a message to the controller to let it know it is done
