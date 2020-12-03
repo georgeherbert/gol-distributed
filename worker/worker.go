@@ -261,7 +261,6 @@ func main() {
 		heightToReceive := height + 2
 		world := initialiseWorld(heightToReceive, width, messages)
 		fmt.Println("Received world")
-
 		workers := int(math.Ceil(float64(height) / 8))
 		parts := createPartChannels(workers)
 		stopWorkers := createStopWorkersChannels(workers)
