@@ -1,3 +1,5 @@
+BEFORE OPTIMISING (\n char sent after every element in the world)
+----------------
 BenchmarkGol/1-4 	       1	194096590160 ns/op    219251455552 ns/op    218879780619 ns/op    219125909173 ns/op
 BenchmarkGol/2-4 	       1	135617088533 ns/op    161486018454 ns/op    161761308434 ns/op    162961517147 ns/op
 BenchmarkGol/3-4 	       1	117679739700 ns/op    142572931277 ns/op    142746596007 ns/op    142513381866 ns/op
@@ -5,3 +7,11 @@ BenchmarkGol/4-4 	       1	113654308772 ns/op    133708384512 ns/op    132669467
 BenchmarkGol/5-4 	       1	99648917662 ns/op     108035435632 ns/op    128117148958 ns/op    128648708880 ns/op
 BenchmarkGol/6-4 	       1	98524292795 ns/op     118830187894 ns/op    125262839433 ns/op    125226492989 ns/op
 
+AFTER OPTIMISING (\n char only sent after the last element in the world ~ half as many bytes sent)
+----------------
+BenchmarkGol/1-4 	       1	173274799000 ns/op    173604817002 ns/op
+BenchmarkGol/2-4 	       1	113169829723 ns/op    112705810810 ns/op
+BenchmarkGol/3-4 	       1	92043774250 ns/op     92317062019 ns/op
+BenchmarkGol/4-4 	       1	82574068935 ns/op     82515784117 ns/op
+BenchmarkGol/5-4 	       1	76537697743 ns/op     76426937563 ns/op
+BenchmarkGol/6-4 	       1	72600732041 ns/op     72447558348 ns/op
