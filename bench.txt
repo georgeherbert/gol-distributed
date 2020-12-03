@@ -15,3 +15,14 @@ BenchmarkGol/3-4 	       1	92043774250 ns/op     92317062019 ns/op
 BenchmarkGol/4-4 	       1	82574068935 ns/op     82515784117 ns/op
 BenchmarkGol/5-4 	       1	76537697743 ns/op     76426937563 ns/op
 BenchmarkGol/6-4 	       1	72600732041 ns/op     72447558348 ns/op
+
+AFTER FURTHER OPTIMISING (Each AWS worker now calculates the next state with multiple worker goroutines)
+----------------
+BenchmarkGol/1-4 	       1	164826099193 ns/op    164850912785 ns/op
+BenchmarkGol/2-4 	       1	108293796006 ns/op    108324918756 ns/op
+BenchmarkGol/3-4 	       1	91474816617 ns/op     90400438857 ns/op
+BenchmarkGol/4-4 	       1	81251175363 ns/op     81560002451 ns/op
+BenchmarkGol/5-4 	       1	75452606241 ns/op     76293239629 ns/op
+BenchmarkGol/6-4 	       1	71508919522 ns/op     71874784308 ns/op
+
+

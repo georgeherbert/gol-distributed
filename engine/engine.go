@@ -79,9 +79,9 @@ func handleNewWorkers(ln net.Listener, messagesWorkersSlice *[]chan string, mute
 		newWorker, _ := ln.Accept()
 		mutexWorkers.Lock()
 		*workers = append(*workers, newWorker)
-		mutexWorkers.Unlock()
 		messagesWorker := make(chan string)
 		*messagesWorkersSlice = append(*messagesWorkersSlice, messagesWorker)
+		mutexWorkers.Unlock()
 		go handleConnection(newWorker, messagesWorker, workers, mutexWorkers, messagesWorkersSlice)
 		fmt.Println("New worker")
 	}
@@ -282,9 +282,9 @@ func handleKeyPresses(messagesController <-chan string, mutexControllers *sync.M
 }
 
 // Gets the number of alive cells from each worker and returns the sum
-func getNumAliveCells(messagesWorkers *[]chan string, threads int) int {
+func getNumAliveCells(messagesWorkersUsed []chan string) int {
 	numAliveCells := 0
-	for _, channel := range (*messagesWorkers)[:threads] {
+	for _, channel := range messagesWorkersUsed {
 		numAliveCellsPartString := <-channel
 		numAliveCellsPart := netStringToInt(numAliveCellsPartString)
 		numAliveCells += numAliveCellsPart
@@ -303,9 +303,9 @@ func receiveRowFromWorker(width int, messagesWorker <-chan string) []byte {
 }
 
 // Gets all of the top and bottom rows from the workers and returns a slice of them
-func getRowsFromWorkers(threads int, messagesWorkers *[]chan string, width int) []rowsFromWorkers {
+func getRowsFromWorkers(messagesWorkersUsed []chan string, width int) []rowsFromWorkers {
 	var rowsFromWorkersSlice []rowsFromWorkers
-	for _, workerChan := range (*messagesWorkers)[:threads] {
+	for _, workerChan := range messagesWorkersUsed {
 		topRow := receiveRowFromWorker(width, workerChan)
 		bottomRow := receiveRowFromWorker(width, workerChan)
 		rowsFromWorkersSlice = append(rowsFromWorkersSlice, rowsFromWorkers {
@@ -365,12 +365,12 @@ func receiveWorldFromWorkers(height int, sectionHeights []int, width int, messag
 
 // Works out what command needs to be sent to the workers
 func sendCommandToWorkers(send chan bool, workersUsed []net.Conn, height int, sectionHeights []int, width int,
-	messagesWorkers *[]chan string, threads int, world *[][]byte, shutDownChan chan bool, turn *int, turns int,
+	messagesWorkersUsed []chan string, world *[][]byte, shutDownChan chan bool, turn *int, turns int,
 	workers *[]net.Conn, shutDown *bool, completedTurns int) {
 	select {
 	case <-send:
 		sendToAll(workersUsed, "SEND_WORLD\n")
-		*world = receiveWorldFromWorkers(height, sectionHeights, width, (*messagesWorkers)[:threads])
+		*world = receiveWorldFromWorkers(height, sectionHeights, width, messagesWorkersUsed)
 		send <- true
 	case <-shutDownChan:
 		*turn = turns
@@ -387,9 +387,9 @@ func sendCommandToWorkers(send chan bool, workersUsed []net.Conn, height int, se
 
 // Performs the specified number of turns of the world
 func performAllTurns(turns int, pause <-chan bool, mutexTurnsWorld *sync.Mutex, numAliveCells *int,
-	messagesWorkers *[]chan string, threads int, completedTurns *int, width int, workersUsed []net.Conn,
-	mutexWorkers *sync.Mutex, send chan bool, height int, sectionHeights []int, world *[][]byte,
-	shutDownChan chan bool, workers *[]net.Conn, shutDown *bool) {
+	messagesWorkersUsed []chan string, completedTurns *int, width int, workersUsed []net.Conn, mutexWorkers *sync.Mutex,
+	send chan bool, height int, sectionHeights []int, world *[][]byte, shutDownChan chan bool, workers *[]net.Conn,
+	shutDown *bool) {
 	for turn := 0; turn < turns; turn++ {
 		select {
 		case <-pause:
@@ -397,13 +397,13 @@ func performAllTurns(turns int, pause <-chan bool, mutexTurnsWorld *sync.Mutex, 
 		default: // If the controller has not requested a pause just move onto performing the next turn of the world
 		}
 		mutexTurnsWorld.Lock()
-		*numAliveCells = getNumAliveCells(messagesWorkers, threads)
+		*numAliveCells = getNumAliveCells(messagesWorkersUsed)
 		*completedTurns = turn + 1
-		rowsFromWorkersSlice := getRowsFromWorkers(threads, messagesWorkers, width)
+		rowsFromWorkersSlice := getRowsFromWorkers(messagesWorkersUsed, width)
 		sendRowsToWorkers(rowsFromWorkersSlice, workersUsed)
 		mutexWorkers.Lock()
-		sendCommandToWorkers(send, workersUsed, height, sectionHeights, width, messagesWorkers, threads,
-			world, shutDownChan, &turn, turns, workers, shutDown, *completedTurns)
+		sendCommandToWorkers(send, workersUsed, height, sectionHeights, width, messagesWorkersUsed, world, shutDownChan,
+			&turn, turns, workers, shutDown, *completedTurns)
 		mutexWorkers.Unlock()
 		mutexTurnsWorld.Unlock()
 	}
@@ -424,6 +424,7 @@ func main() {
 		height, width, turns, threads := getDetails(messagesController)
 		mutexWorkers.Lock()
 		workersUsed := (*workers)[:threads]
+		messagesWorkersUsed := (*messagesWorkers)[:threads]
 		mutexWorkers.Unlock()
 		done := false
 		completedTurns := 0
@@ -453,11 +454,12 @@ func main() {
 			shutDownChan := make(chan bool)
 			go handleKeyPresses(messagesController, mutexControllers, mutexTurnsWorld, controllers, &world,
 				&completedTurns, pause, send, shutDownChan)
-			performAllTurns(turns, pause, mutexTurnsWorld, &numAliveCells, messagesWorkers, threads, &completedTurns,
-				width, workersUsed, mutexWorkers, send, height, sectionHeights, &world, shutDownChan,
-				workers, &shutDown)
+			performAllTurns(turns, pause, mutexTurnsWorld, &numAliveCells, messagesWorkersUsed, &completedTurns, width,
+				workersUsed, mutexWorkers, send, height, sectionHeights, &world, shutDownChan, workers, &shutDown)
 			mutexTurnsWorld.Lock()
-			world = receiveWorldFromWorkers(height, sectionHeights, width, (*messagesWorkers)[:threads])
+			mutexWorkers.Lock()
+			world = receiveWorldFromWorkers(height, sectionHeights, width, messagesWorkersUsed)
+			mutexWorkers.Unlock()
 			mutexTurnsWorld.Unlock()
 		}
 		// Once it has done all the iterations, send a message to the controller to let it know it is done
