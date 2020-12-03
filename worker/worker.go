@@ -8,6 +8,11 @@ import (
 	"strconv"
 )
 
+const (
+	dead = 0
+	alive = 255
+)
+
 // Handles the engine by taking in its input and putting it into the messages channel
 func handleEngine(conn net.Conn, messages chan<- string) {
 	reader := bufio.NewReader(conn)
@@ -28,15 +33,16 @@ func netStringToInt(netString string) int {
 
 // Initialises the world, getting the values from the server
 func initialiseWorld(height int, width int, messages <-chan string) [][]byte {
+	data := <-messages
 	world := make([][]byte, height)
 	for y := range world {
 		world[y] = make([]byte, width)
 	}
+	i := 0
 	for y, row := range world {
 		for x := range row {
-			msg := <-messages
-			cell := netStringToInt(msg)
-			world[y][x] = byte(cell)
+			world[y][x] = data[i]
+			i += 1
 		}
 	}
 	return world
@@ -66,7 +72,7 @@ func getNeighbours(world [][]byte, row int, column int) []byte {
 func calcLiveNeighbours(neighbours []byte) int {
 	liveNeighbours := 0
 	for _, neighbour := range neighbours {
-		if neighbour == 255 {
+		if neighbour == alive {
 			liveNeighbours += 1
 		}
 	}
@@ -75,14 +81,14 @@ func calcLiveNeighbours(neighbours []byte) int {
 
 // Returns the new value of a cell given its current value and number of live neighbours
 func calcValue(item byte, liveNeighbours int) byte {
-	calculatedValue := byte(0)
-	if item == 255 {
+	calculatedValue := byte(dead)
+	if item == alive {
 		if liveNeighbours == 2 || liveNeighbours == 3 {
-			calculatedValue = byte(255)
+			calculatedValue = byte(alive)
 		}
 	} else {
 		if liveNeighbours == 3 {
-			calculatedValue = byte(255)
+			calculatedValue = byte(alive)
 		}
 	}
 	return calculatedValue
@@ -107,16 +113,18 @@ func calcNextState(world [][]byte) [][]byte {
 func sendRowToEngine(row []byte, engine net.Conn) {
 	writer := bufio.NewWriter(engine)
 	for _, element := range row {
-		writer.WriteString(fmt.Sprintf("%d\n", int(element)))
+		writer.WriteByte(element)
 	}
+	writer.WriteString("\n")
 	writer.Flush()
 }
 
 // Receives a row from the engine to be placed in the world
 func receiveRowFromEngine(width int, messages <-chan string) []byte {
+	data := <-messages
 	var row []byte
 	for i := 0; i < width; i++ {
-		row = append(row, byte(netStringToInt(<-messages)))
+		row = append(row, data[i])
 	}
 	return row
 }
@@ -126,7 +134,7 @@ func calcNumAliveCells(world [][]byte) int {
 	total := 0
 	for _, row := range world {
 		for _, element := range row {
-			if element == 255 {
+			if element == alive {
 				total += 1
 			}
 		}
@@ -140,9 +148,10 @@ func sendPartToEngine(engine net.Conn, world [][]byte) {
 	writer := bufio.NewWriter(engine)
 	for _, row := range world[1:len(world) - 1] {
 		for _, cell := range row {
-			writer.WriteString(fmt.Sprintf("%d\n", int(cell)))
+			writer.WriteByte(cell)
 		}
 	}
+	writer.WriteString("\n")
 	writer.Flush()
 }
 

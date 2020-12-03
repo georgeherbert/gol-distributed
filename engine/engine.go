@@ -94,15 +94,16 @@ func getDetails(messagesController <-chan string) (int, int, int, int) {
 
 // Initialises the world, getting the values from the server (only used if there are 0 turns)
 func initialiseWorld(height int, width int, messages <-chan string) [][]byte {
+	data := <-messages
 	world := make([][]byte, height)
 	for y := range world {
 		world[y] = make([]byte, width) // Create an array of bytes for each row
 	}
+	i := 0
 	for y, row := range world {
 		for x := range row {
-			msg, _ := <-messages
-			cell := netStringToInt(msg)
-			world[y][x] = byte(cell) // Add each cell to the row
+			world[y][x] = data[i] // Add each cell to the row
+			i += 1
 		}
 	}
 	return world
@@ -134,9 +135,10 @@ func sendPartToWorker(part [][]byte, worker net.Conn) {
 	writer := bufio.NewWriter(worker)
 	for _, row := range part {
 		for _, cell := range row {
-			writer.WriteString(fmt.Sprintf( "%d\n", cell))
+			writer.WriteByte(cell)
 		}
 	}
+	writer.WriteString("\n")
 	writer.Flush()
 }
 
@@ -204,9 +206,10 @@ func sendWorld(world [][]byte, conn net.Conn, completedTurns int) {
 	writer := bufio.NewWriter(conn)
 	for _, row := range world {
 		for _, element := range row {
-			writer.WriteString(fmt.Sprintf( "%d\n", element))
+			writer.WriteByte(element)
 		}
 	}
+	writer.WriteString("\n")
 	writer.Flush()
 }
 
@@ -267,9 +270,10 @@ func getNumAliveCells(messagesWorker *[]chan string, threads int) int {
 
 // Receives a row from a worker and returns it
 func receiveRowFromWorker(width int, messages <-chan string) []byte {
+	data := <-messages
 	var row []byte
 	for i := 0; i < width; i++ {
-		row = append(row, byte(netStringToInt(<-messages)))
+		row = append(row, data[i])
 	}
 	return row
 }
@@ -292,8 +296,9 @@ func getRowsFromWorkers(threads int, messagesWorker *[]chan string, width int) [
 func sendRowToWorker(row []byte, worker net.Conn) {
 	writer := bufio.NewWriter(worker)
 	for _, element := range row {
-		writer.WriteString(fmt.Sprintf("%d\n", int(element)))
+		writer.WriteByte(element)
 	}
+	writer.WriteString("\n")
 	writer.Flush()
 }
 
@@ -312,10 +317,12 @@ func sendRowsToWorkers(rowsFromWorkersSlice []rowsFromWorkers, workersUsed []net
 	}
 }
 
-// Receive the top and bottom rows from each worker
+// Receive the world from the workers
 func receiveWorldFromWorkers(height int, sectionHeights []int, width int, messagesChannels []chan string) [][]byte {
 	world := make([][]byte, height)
 	for i, channel := range messagesChannels {
+		data := <-channel
+		z := 0
 		var part [][]byte
 		part = make([][]byte, sectionHeights[i])
 		for y := range part {
@@ -323,9 +330,8 @@ func receiveWorldFromWorkers(height int, sectionHeights []int, width int, messag
 		}
 		for y, row := range part {
 			for x := range row {
-				msg, _ := <-channel
-				cell := netStringToInt(msg)
-				part[y][x] = byte(cell)
+				part[y][x] = data[z]
+				z += 1
 			}
 		}
 		world = append(world, part...)

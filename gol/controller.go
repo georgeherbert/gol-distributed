@@ -18,6 +18,11 @@ type distributorChannels struct {
 	keyPresses <-chan rune
 }
 
+const (
+	dead = 0
+	alive = 255
+)
+
 // Sends the file name to io.go so the world can be initialised
 func sendFileName(fileName string, ioCommand chan<- ioCommand, ioFileName chan<- string) {
 	ioCommand <- ioInput
@@ -28,8 +33,15 @@ func sendFileName(fileName string, ioCommand chan<- ioCommand, ioFileName chan<-
 func sendWorld(height int, width int, ioInput <-chan uint8, conn net.Conn) {
 	writer := bufio.NewWriter(conn)
 	for i := 0; i < height * width; i++ {
-		writer.WriteString(fmt.Sprintf("%d\n", <-ioInput))
+		switch <-ioInput {
+		case 0:
+			writer.WriteByte(dead)
+		case 255:
+			writer.WriteByte(alive)
+		}
+		//writer.WriteString(fmt.Sprintf("%d\n", <-ioInput))
 	}
+	writer.WriteString("\n")
 	writer.Flush()
 }
 
@@ -104,15 +116,21 @@ func netStringToInt(netString string) int {
 func receiveWorld(height int, width int, reader *bufio.Reader) ([][]byte, int) {
 	completedTurnsString, _ := reader.ReadString('\n')
 	completedTurns := netStringToInt(completedTurnsString)
+	data, _ := reader.ReadString('\n')
+	z := 0
 	world := make([][]byte, height)
 	for y := range world {
 		world[y] = make([]byte, width)
 	}
 	for y, row := range world {
 		for x := range row {
-			msg, _ := reader.ReadString('\n')
-			cell := netStringToInt(msg)
-			world[y][x] = byte(cell)
+			switch data[z] {
+			case dead:
+				world[y][x] = byte(0)
+			case alive:
+				world[y][x] = byte(255)
+			}
+			z += 1
 		}
 	}
 	return world, completedTurns
