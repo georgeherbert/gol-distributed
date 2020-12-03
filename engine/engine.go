@@ -322,7 +322,7 @@ func receiveWorldFromWorkers(height int, sectionHeights []int, width int, messag
 	world := make([][]byte, height)
 	for i, channel := range messagesChannels {
 		data := <-channel
-		z := 0
+		j := 0
 		var part [][]byte
 		part = make([][]byte, sectionHeights[i])
 		for y := range part {
@@ -330,8 +330,8 @@ func receiveWorldFromWorkers(height int, sectionHeights []int, width int, messag
 		}
 		for y, row := range part {
 			for x := range row {
-				part[y][x] = data[z]
-				z += 1
+				part[y][x] = data[j]
+				j += 1
 			}
 		}
 		world = append(world, part...)
