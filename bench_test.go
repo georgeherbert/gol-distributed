@@ -16,7 +16,7 @@ func BenchmarkGol (b *testing.B) {
 				Threads:     thread,
 				ImageWidth:  5120,
 				ImageHeight: 5120,
-				Engine:      "3.239.113.143:8030",
+				Engine:      "3.230.171.174:8030",
 			}
 			for i := 0; i < b.N; i++ {
 				events := make(chan gol.Event)
