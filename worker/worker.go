@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"strconv"
+	"math"
 )
 
 const (
@@ -46,6 +47,53 @@ func initialiseWorld(height int, width int, messages <-chan string) [][]byte {
 		}
 	}
 	return world
+}
+
+// Returns a slice of channels, that will each be used to communicate a section of the world between the worker and its own workers
+func createPartChannels(numOfWorkers int) []chan [][]byte{
+	var parts []chan [][]byte
+	for i := 0; i < numOfWorkers; i++ {
+		parts = append(parts, make(chan [][]byte))
+	}
+	return parts
+}
+
+// Returns a slice of channels, that will each be used to stop the workers running once all turns are complete
+func createStopWorkersChannels(numOfWorkers int) []chan bool {
+	var stopWorkerChannels []chan bool
+	for i := 0; i < numOfWorkers; i++ {
+		stopWorkerChannels = append(stopWorkerChannels, make(chan bool))
+	}
+	return stopWorkerChannels
+}
+
+// Returns a slice containing the height of each section that each worker will process
+func calcSectionHeights(height int, threads int) []int {
+	heightOfParts := make([]int, threads)
+	for i := range heightOfParts{
+		heightOfParts[i] = 0
+	}
+	partAssigning := 0
+	for i := 0; i < height; i++ {
+		heightOfParts[partAssigning] += 1
+		if partAssigning == len(heightOfParts) - 1 {
+			partAssigning = 0
+		} else {
+			partAssigning += 1
+		}
+	}
+	return heightOfParts
+}
+
+// Returns a slice containing the initial y-values of the parts of the world that each worker will process
+func calcStartYValues(sectionHeights []int) []int {
+	startYValues := make([]int, len(sectionHeights))
+	totalHeightAssigned := 0
+	for i, height := range sectionHeights {
+		startYValues[i] = totalHeightAssigned
+		totalHeightAssigned += height
+	}
+	return startYValues
 }
 
 // Returns the neighbours of a cell at given coordinates
@@ -108,6 +156,38 @@ func calcNextState(world [][]byte) [][]byte {
 	}
 	return nextWorld
 }
+
+// Takes part of an image, calculates the next stage, and passes it back
+func worker(part chan [][]byte, stopWorker chan bool) {
+	allTurnsCalculated := false
+	for !allTurnsCalculated {
+		select {
+		case thePart := <-part:
+			nextPart := calcNextState(thePart)
+			part <- nextPart
+		case <-stopWorker:
+			allTurnsCalculated = true
+		}
+	}
+}
+
+// Returns part of a world given the number of threads, the part number, the startY, and the endY
+func getPart(world [][]byte, workers int, partNum int, startY int, endY int) [][]byte {
+	var worldPart [][]byte
+	if workers == 1 { // Having 1 thread is a special case as the top and bottom row will come from the same part
+		worldPart = append(worldPart, world...)
+	} else {
+		if partNum == 0 { // If it is the first part add the bottom row of the world as the top row
+			worldPart = append(worldPart, world[:endY + 1]...)
+		} else if partNum == workers - 1 { // If it is the last part add the top row of the world as the bottom row
+			worldPart = append(worldPart, world[startY - 1:]...)
+		} else {
+			worldPart = append(worldPart, world[startY - 1:endY+1]...)
+		}
+	}
+	return worldPart
+}
+
 
 // Sends a row in the world to the engine
 func sendRowToEngine(row []byte, engine net.Conn) {
@@ -181,8 +261,26 @@ func main() {
 		heightToReceive := height + 2
 		world := initialiseWorld(heightToReceive, width, messages)
 		fmt.Println("Received world")
+
+		workers := int(math.Ceil(float64(height) / 8))
+		parts := createPartChannels(workers)
+		stopWorkers := createStopWorkersChannels(workers)
+		sectionHeights := calcSectionHeights(height, width)
+		startYValues := calcStartYValues(sectionHeights)
+		for i, part := range parts { // Starts the workers ready to receive parts to calculate the next state
+			go worker(part, stopWorkers[i])
+		}
 		for {
-			nextWorld := calcNextState(world)
+			for i, part := range parts { // Send the next part to each worker
+				startY := startYValues[i]
+				endY := startY + sectionHeights[i]
+				worldPart := getPart(world, workers, i, startY, endY)
+				part <- worldPart
+			}
+			var nextWorld [][]byte
+			for _, part := range parts { // Collect each part from each worker and build the next state of the world
+				nextWorld = append(nextWorld, <-part...)
+			}
 			aliveCells := calcNumAliveCells(nextWorld)
 			fmt.Fprintf(engine, "%d\n", aliveCells) // Report the number of alive cells to the engine
 			// Send the top row and bottom row to the controller
@@ -204,6 +302,9 @@ func main() {
 			} else if status == "SEND_WORLD\n" {
 				sendPartToEngine(engine, world)
 			}
+		}
+		for _, stopWorker := range stopWorkers {
+			stopWorker <-true
 		}
 		sendPartToEngine(engine, world)
 	}
