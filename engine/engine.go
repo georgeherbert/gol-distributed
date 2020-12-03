@@ -17,15 +17,19 @@ type rowsFromWorkers struct {
 
 // Removes a given connection and its corresponding messages channel from slices
 func removeConnection(connection net.Conn, connectionSlice *[]net.Conn, messagesSlice *[]chan string) {
-	index := 0
+	index := -1
 	for i, conn := range *connectionSlice {
 		if connection == conn {
 			index = i
 		}
 	}
-	*connectionSlice = append((*connectionSlice)[:index], (*connectionSlice)[index + 1:]...)
-	if len(*messagesSlice) > 0 {
-		*messagesSlice = append((*messagesSlice)[:index], (*messagesSlice)[index + 1:]...)
+	if index != -1 {
+		if len(*connectionSlice) > 0 {
+			*connectionSlice = append((*connectionSlice)[:index], (*connectionSlice)[index+1:]...)
+		}
+		if len(*messagesSlice) > 0 {
+			*messagesSlice = append((*messagesSlice)[:index], (*messagesSlice)[index+1:]...)
+		}
 	}
 }
 
@@ -419,8 +423,6 @@ func main() {
 		height, width, turns, threads := getDetails(messagesController)
 		mutexWorkers.Lock()
 		workersUsed := (*workers)[:threads]
-		fmt.Println(workers)
-		fmt.Println(controllers)
 		mutexWorkers.Unlock()
 		done := false
 		completedTurns := 0
@@ -466,6 +468,7 @@ func main() {
 		for _, conn := range *controllers { // Send the world back to all of the controllers
 			sendWorld(world, conn, completedTurns)
 		}
+		*controllers = []net.Conn{}
 		mutexControllers.Unlock()
 	}
 	sendToAll(*controllers, "SHUTTING_DOWN\n")
