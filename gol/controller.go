@@ -154,7 +154,10 @@ func controller(p Params, c distributorChannels) {
 		p.Engine = "127.0.0.1:8030"
 	}
 	conn, err := net.Dial("tcp", p.Engine) // Dials the engine and establishes reader
-	if err == nil { // If there's no error it means the engine is active and can be connected to
+	switch {
+	case p.Threads > p.ImageHeight:
+		fmt.Println("Error: You cannot have an image height greater than the number of workers.")
+	case err == nil: // If there's no error it means the engine is active and can be connected to
 		reader := bufio.NewReader(conn)
 		fileName := strconv.Itoa(p.ImageWidth) + "x" + strconv.Itoa(p.ImageHeight)
 		if p.Rejoin == false {
@@ -183,7 +186,7 @@ func controller(p Params, c distributorChannels) {
 			c.events <- StateChange{completedTurns, Quitting}
 		case <-quit: // If the controller quits, this stops the code block above executing
 		}
-	} else {
+	case err != nil:
 		fmt.Printf("Error: no engine at address %s\n", p.Engine)
 	}
 	close(c.events) // Close the channel to stop the SDL goroutine gracefully. Removing may cause deadlock.
